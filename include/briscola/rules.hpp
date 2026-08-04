@@ -20,7 +20,7 @@ int cardPoints(int rank);
  * @param northCard Card played by North.
  * @param southCard Card played by South.
  * @param leader Player who played first.
- * @param briscolaSuit Trump suit for the game.
+ * @param briscolaSuit Briscola suit for the game.
  * @return Round winner and awarded points.
  * @throws std::invalid_argument If either card rank is invalid.
  */

@@ -19,8 +19,9 @@ static bool sameCard(
     const std::optional<CardPrediction>& prediction,
     const std::optional<CardPrediction>& truth
 ) {
-    return prediction && truth;
-    // && prediction->card == truth->card;
+    return prediction && truth &&
+           prediction->card.rank == truth->card.rank &&
+           prediction->card.suit == truth->card.suit;
 }
 
 EvaluationReport evaluate(
@@ -50,10 +51,15 @@ EvaluationReport evaluate(
                                   actual->outcome->winner == expected.outcome->winner;
     }
 
-    report.briscola.correct = false;
-    report.gameResult.correct += false;
-    report.gameResult.correct += false;
-    report.gameResult.correct += false;
+    report.briscola.correct = prediction.briscola && groundTruth.briscola &&
+                              prediction.briscola->rank == groundTruth.briscola->rank &&
+                              prediction.briscola->suit == groundTruth.briscola->suit;
+    report.gameResult.correct += prediction.winner && groundTruth.winner &&
+                                 prediction.winner == groundTruth.winner;
+    report.gameResult.correct += prediction.northPoints && groundTruth.northPoints &&
+                                 prediction.northPoints == groundTruth.northPoints;
+    report.gameResult.correct += prediction.southPoints && groundTruth.southPoints &&
+                                 prediction.southPoints == groundTruth.southPoints;
     return report;
 }
 

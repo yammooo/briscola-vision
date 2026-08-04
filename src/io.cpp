@@ -2,18 +2,28 @@
 
 #include <algorithm>
 #include <fstream>
-#include <map>
-#include <regex>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace briscola {
 
-static std::vector<std::string> splitCsv(const std::string& line) {
+static int roundNumber(const std::filesystem::path& video) {
+    const std::string name = video.stem().string();
+    const std::size_t position = name.rfind("round");
+    if (position == std::string::npos) {
+        throw std::runtime_error("invalid round filename: " + name);
+    }
+    return std::stoi(name.substr(position + 5));
+}
+
+static std::vector<std::string> splitCsvLine(const std::string& line) {
     std::vector<std::string> fields;
     std::stringstream stream(line);
     std::string field;
+
     while (std::getline(stream, field, ',')) {
         if (!field.empty() && field.back() == '\r') {
             field.pop_back();
@@ -37,7 +47,7 @@ static Player parsePlayer(const std::string& value) {
     throw std::runtime_error("invalid player: " + value);
 }
 
-static const char* toString(Suit suit) {
+static const char* suitName(Suit suit) {
     switch (suit) {
         case Suit::Cups: return "cups";
         case Suit::Coins: return "coins";
@@ -47,52 +57,42 @@ static const char* toString(Suit suit) {
     throw std::runtime_error("invalid suit");
 }
 
-static const char* toString(Player player) {
+static const char* playerName(Player player) {
     return player == Player::North ? "North" : "South";
 }
 
-static const char* toString(GameWinner winner) {
-    switch (winner) {
-        case GameWinner::North: return "North";
-        case GameWinner::South: return "South";
-        case GameWinner::Draw: return "Draw";
-    }
-    throw std::runtime_error("invalid winner");
+static const char* winnerName(GameWinner winner) {
+    if (winner == GameWinner::North) return "North";
+    if (winner == GameWinner::South) return "South";
+    return "Draw";
 }
 
 std::vector<std::filesystem::path> findRoundVideos(
     const std::filesystem::path& folder
 ) {
     if (!std::filesystem::is_directory(folder)) {
-        throw std::runtime_error("game folder does not exist: " + folder.string());
-    }
-
-    const std::regex pattern(R"(.*round([0-9]+)\.mp4)", std::regex::icase);
-    std::map<int, std::filesystem::path> rounds;
-
-    for (const auto& entry : std::filesystem::directory_iterator(folder)) {
-        std::smatch match;
-        const auto filename = entry.path().filename().string();
-        if (entry.is_regular_file() && std::regex_match(filename, match, pattern)) {
-            const int number = std::stoi(match[1].str());
-            if (!rounds.emplace(number, entry.path()).second) {
-                throw std::runtime_error("duplicate round video: " + std::to_string(number));
-            }
-        }
-    }
-
-    if (rounds.size() != 20) {
-        throw std::runtime_error("a game must contain exactly 20 round videos");
+        throw std::runtime_error("invalid game folder: " + folder.string());
     }
 
     std::vector<std::filesystem::path> videos;
-    videos.reserve(20);
-    for (int number = 1; number <= 20; ++number) {
-        const auto round = rounds.find(number);
-        if (round == rounds.end()) {
-            throw std::runtime_error("missing round video: " + std::to_string(number));
+    for (const auto& entry : std::filesystem::directory_iterator(folder)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".mp4") {
+            videos.push_back(entry.path());
         }
-        videos.push_back(round->second);
+    }
+
+    if (videos.size() != 20) {
+        throw std::runtime_error("a game must contain 20 videos");
+    }
+
+    std::sort(videos.begin(), videos.end(), [](const auto& left, const auto& right) {
+        return roundNumber(left) < roundNumber(right);
+    });
+
+    for (std::size_t index = 0; index < videos.size(); ++index) {
+        if (roundNumber(videos[index]) != static_cast<int>(index + 1)) {
+            throw std::runtime_error("round videos must be numbered 1 to 20");
+        }
     }
     return videos;
 }
@@ -111,9 +111,10 @@ GameResult readGroundTruthCsv(const std::filesystem::path& csv) {
 
     while (std::getline(input, line)) {
         if (line.empty() || line == "\r") continue;
-        const auto fields = splitCsv(line);
+
+        const auto fields = splitCsvLine(line);
         if (fields.size() != 10) {
-            throw std::runtime_error("ground-truth row must contain 10 fields");
+            throw std::runtime_error("invalid CSV row");
         }
 
         const Card north{std::stoi(fields[1]), parseSuit(fields[2])};
@@ -122,9 +123,10 @@ GameResult readGroundTruthCsv(const std::filesystem::path& csv) {
         const Player winner = parsePlayer(fields[8]);
         const int points = std::stoi(fields[9]);
 
-/*         if (game.briscola && !(*game.briscola == briscola)) {
-            throw std::runtime_error("ground truth contains inconsistent briscola cards");
-        } */
+        if (game.briscola &&
+            (game.briscola->rank != briscola.rank || game.briscola->suit != briscola.suit)) {
+            throw std::runtime_error("briscola changes between rounds");
+        }
         game.briscola = briscola;
 
         RoundObservation observation{
@@ -144,11 +146,11 @@ GameResult readGroundTruthCsv(const std::filesystem::path& csv) {
     }
 
     if (game.rounds.size() != 20) {
-        throw std::runtime_error("ground truth must contain exactly 20 rounds");
+        throw std::runtime_error("ground truth must contain 20 rounds");
     }
     for (std::size_t index = 0; index < game.rounds.size(); ++index) {
         if (game.rounds[index].number != static_cast<int>(index + 1)) {
-            throw std::runtime_error("ground-truth rounds must be ordered 1 through 20");
+            throw std::runtime_error("CSV rounds must be numbered 1 to 20");
         }
     }
 
@@ -175,19 +177,19 @@ void writeGameCsv(const GameResult& game, const std::filesystem::path& output) {
         csv << result.number << ',';
         if (round.northCard) csv << round.northCard->card.rank;
         csv << ',';
-        if (round.northCard) csv << toString(round.northCard->card.suit);
+        if (round.northCard) csv << suitName(round.northCard->card.suit);
         csv << ',';
         if (round.southCard) csv << round.southCard->card.rank;
         csv << ',';
-        if (round.southCard) csv << toString(round.southCard->card.suit);
+        if (round.southCard) csv << suitName(round.southCard->card.suit);
         csv << ',';
         if (game.briscola) csv << game.briscola->rank;
         csv << ',';
-        if (game.briscola) csv << toString(game.briscola->suit);
+        if (game.briscola) csv << suitName(game.briscola->suit);
         csv << ',';
-        if (round.leader) csv << toString(*round.leader);
+        if (round.leader) csv << playerName(*round.leader);
         csv << ',';
-        if (result.outcome) csv << toString(result.outcome->winner);
+        if (result.outcome) csv << playerName(result.outcome->winner);
         csv << ',';
         if (result.outcome) csv << result.outcome->points;
         csv << '\n';
@@ -196,11 +198,13 @@ void writeGameCsv(const GameResult& game, const std::filesystem::path& output) {
 
 void writeGameSummary(const GameResult& game, std::ostream& output) {
     output << "Winner: ";
-    if (game.winner) output << toString(*game.winner);
+    if (game.winner) output << winnerName(*game.winner);
     else output << "Unknown";
+
     output << "\nNorth points: ";
     if (game.northPoints) output << *game.northPoints;
     else output << "Unknown";
+
     output << "\nSouth points: ";
     if (game.southPoints) output << *game.southPoints;
     else output << "Unknown";
