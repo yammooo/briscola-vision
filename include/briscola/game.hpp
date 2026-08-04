@@ -23,10 +23,14 @@ public:
     /**
      * @brief Analyze and score one complete game folder.
      * @param gameFolder Folder containing rounds 1 through 20.
+     * @param debug Optional destination for diagnostic images.
      * @return Complete or partially resolved game result.
      * @throws std::runtime_error If inputs are missing, invalid, or unreadable.
      */
-    GameResult run(const std::filesystem::path& gameFolder);
+    GameResult run(
+        const std::filesystem::path& gameFolder,
+        DebugSink* debug = nullptr
+    );
 
 private:
     IRoundAnalyzer& roundAnalyzer_;          ///< Injected round analyzer.

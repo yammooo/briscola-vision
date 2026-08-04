@@ -14,6 +14,28 @@ The briscola is one fact for the whole game, and it may no longer be visible in 
 
 Only the replaceable vision decisions are interfaces. Rules, orchestration, I/O, and evaluation remain separate so alternative OpenCV pipelines can be evaluated through the same game logic.
 
+Debugging uses the same optional `DebugSink` parameter for every pipeline. An analyzer publishes annotated images without deciding how they are presented; the sink can save them, display them, or do both. Passing `nullptr` disables debugging and must not change analysis results.
+
+## Application wiring
+
+`runApplication` contains the common command-line flow. A concrete application only constructs its selected implementations and passes them in:
+
+```cpp
+int main(int argc, char* argv[]) {
+    MyRoundAnalyzer analyzer;
+    MyBriscolaProvider provider;
+    return briscola::runApplication(argc, argv, analyzer, provider);
+}
+```
+
+The command line is:
+
+```text
+APP GAME_FOLDER OUTPUT_CSV [--debug-window] [--debug-dir DIRECTORY]
+```
+
+The two debug options can be used together.
+
 ## Build
 
 ```sh

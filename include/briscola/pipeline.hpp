@@ -3,6 +3,7 @@
 
 /** @file pipeline.hpp @brief Replaceable computer-vision pipeline contracts. */
 
+#include "briscola/debug.hpp"
 #include "briscola/model.hpp"
 
 #include <filesystem>
@@ -20,11 +21,13 @@ public:
     /**
      * @brief Analyze one round video.
      * @param video Path to the round video.
+     * @param debug Optional destination for diagnostic images.
      * @return Possibly incomplete round observation.
      * @throws std::runtime_error If the video cannot be read.
      */
     virtual RoundObservation analyze(
-        const std::filesystem::path& video
+        const std::filesystem::path& video,
+        DebugSink* debug = nullptr
     ) = 0;
 };
 
@@ -38,11 +41,13 @@ public:
      * @brief Resolve the briscola from videos or collected observations.
      * @param videos Round videos in numeric order.
      * @param observations Corresponding round observations.
+     * @param debug Optional destination for diagnostic images.
      * @return Resolved card, or empty when unavailable.
      */
     virtual std::optional<Card> find(
         const std::vector<std::filesystem::path>& videos,
-        const std::vector<RoundObservation>& observations
+        const std::vector<RoundObservation>& observations,
+        DebugSink* debug = nullptr
     ) = 0;
 };
 

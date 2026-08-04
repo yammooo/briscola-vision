@@ -12,17 +12,20 @@ GameRunner::GameRunner(
     IBriscolaProvider& briscolaProvider
 ) : roundAnalyzer_(roundAnalyzer), briscolaProvider_(briscolaProvider) {}
 
-GameResult GameRunner::run(const std::filesystem::path& gameFolder) {
+GameResult GameRunner::run(
+    const std::filesystem::path& gameFolder,
+    DebugSink* debug
+) {
     const auto videos = findRoundVideos(gameFolder);
     std::vector<RoundObservation> observations;
     observations.reserve(videos.size());
 
     for (const auto& video : videos) {
-        observations.push_back(roundAnalyzer_.analyze(video));
+        observations.push_back(roundAnalyzer_.analyze(video, debug));
     }
 
     GameResult game;
-    game.briscola = briscolaProvider_.find(videos, observations);
+    game.briscola = briscolaProvider_.find(videos, observations, debug);
     game.rounds.reserve(observations.size());
 
     int northPoints = 0;

@@ -4,10 +4,15 @@ project(briscola_vision LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(OpenCV REQUIRED COMPONENTS core highgui imgcodecs)
+
 add_library(briscola
+    src/app.cpp
+    src/debug.cpp
     src/evaluation.cpp
     src/game.cpp
     src/io.cpp
     src/rules.cpp
 )
-target_include_directories(briscola PUBLIC include)
+target_include_directories(briscola PUBLIC include ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(briscola PUBLIC ${OpenCV_LIBS})
