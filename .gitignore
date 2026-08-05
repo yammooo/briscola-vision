@@ -5,3 +5,8 @@
 /data/
 /models/*.onnx
 /debug/
+/training/background/
+/training/dataset/
+/training/runs/
+__pycache__/
+.vscode/
