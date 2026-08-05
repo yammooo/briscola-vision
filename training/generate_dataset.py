@@ -121,8 +121,8 @@ def place_card(
 
         # Move each corner slightly to create a perspective effect.
         distortion = rng.uniform(
-            -0.06,
-            0.06,
+            -0.12,
+            0.12,
             size=(4, 2),
         ) * min(new_width, new_height)
         destination_corners += distortion
