@@ -25,6 +25,7 @@ ALLOWED_TEXTURES = {
 }
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+CROP_RANGES = ((0.0, 0.0), (0.1, 0.2), (0.3, 0.4), (0.45, 0.55))
 
 
 def find_images(directory: Path) -> list[Path]:
@@ -75,6 +76,7 @@ def create_background(
 def place_card(
     card: np.ndarray,
     output_size: int,
+    crop_range: tuple[float, float],
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     card_height, card_width = card.shape[:2]
@@ -149,9 +151,9 @@ def place_card(
 
         full_source_mask = np.full((card_height, card_width), 255, dtype=np.uint8)
         visible_source_mask = full_source_mask.copy()
-        if rng.random() < 0.5:
+        if crop_range[1] > 0:
             edge = int(rng.integers(4))
-            fraction = rng.uniform(0.1, 0.5)
+            fraction = rng.uniform(*crop_range)
             if edge == 0:
                 visible_source_mask[: int(card_height * fraction)] = 0
             elif edge == 1:
@@ -204,6 +206,7 @@ def create_scene(
     background_paths: list[Path],
     output_size: int,
     minimum_visible: float,
+    crop_offset: int,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, list[str]]:
     background_path = background_paths[int(rng.integers(len(background_paths)))]
@@ -212,14 +215,15 @@ def create_scene(
     card_layers: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
     card_count = int(rng.integers(1, 7))
 
-    for _ in range(card_count):
+    for card_index in range(card_count):
         card_path = card_paths[int(rng.integers(len(card_paths)))]
         card = cv2.imread(str(card_path))
 
         if card is None:
             raise RuntimeError(f"cannot read card: {card_path}")
 
-        placed_card = place_card(card, output_size, rng)
+        crop_range = CROP_RANGES[(crop_offset + card_index) % len(CROP_RANGES)]
+        placed_card = place_card(card, output_size, crop_range, rng)
         if placed_card is None:
             continue
 
@@ -306,6 +310,7 @@ def main() -> None:
                 background_paths,
                 args.size,
                 args.min_visible,
+                index,
                 rng,
             )
             if labels:
