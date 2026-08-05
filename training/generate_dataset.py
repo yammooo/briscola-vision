@@ -76,7 +76,7 @@ def place_card(
     card: np.ndarray,
     output_size: int,
     rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     card_height, card_width = card.shape[:2]
 
     source_corners = np.array(
@@ -147,56 +147,36 @@ def place_card(
             (output_size, output_size),
         )
 
-        original_mask = np.full((card_height, card_width), 255, dtype=np.uint8)
-        warped_mask = cv2.warpPerspective(
-            original_mask,
+        full_source_mask = np.full((card_height, card_width), 255, dtype=np.uint8)
+        visible_source_mask = full_source_mask.copy()
+        if rng.random() < 0.5:
+            edge = int(rng.integers(4))
+            fraction = rng.uniform(0.1, 0.5)
+            if edge == 0:
+                visible_source_mask[: int(card_height * fraction)] = 0
+            elif edge == 1:
+                visible_source_mask[int(card_height * (1 - fraction)) :] = 0
+            elif edge == 2:
+                visible_source_mask[:, : int(card_width * fraction)] = 0
+            else:
+                visible_source_mask[:, int(card_width * (1 - fraction)) :] = 0
+
+        full_mask = cv2.warpPerspective(
+            full_source_mask,
+            transform,
+            (output_size, output_size),
+            flags=cv2.INTER_NEAREST,
+        )
+        visible_mask = cv2.warpPerspective(
+            visible_source_mask,
             transform,
             (output_size, output_size),
             flags=cv2.INTER_NEAREST,
         )
 
-        return warped_card, warped_mask > 0, destination_corners
+        return warped_card, full_mask > 0, visible_mask > 0, destination_corners
 
     return None
-
-
-def add_occluders(
-    scene: np.ndarray,
-    rng: np.random.Generator,
-) -> np.ndarray:
-    height, width = scene.shape[:2]
-    occluded_pixels = np.zeros((height, width), dtype=np.uint8)
-
-    occluder_count = int(rng.integers(0, 3))
-
-    for _ in range(occluder_count):
-        center = (
-            int(rng.integers(0, width)),
-            int(rng.integers(0, height)),
-        )
-        axes = (
-            int(rng.integers(width // 20, width // 8)),
-            int(rng.integers(height // 20, height // 8)),
-        )
-        angle = float(rng.uniform(0, 180))
-
-        current_occluder = np.zeros((height, width), dtype=np.uint8)
-        cv2.ellipse(
-            current_occluder,
-            center,
-            axes,
-            angle,
-            0,
-            360,
-            255,
-            -1,
-        )
-
-        random_color = rng.integers(20, 235, size=3, dtype=np.uint8)
-        scene[current_occluder > 0] = random_color
-        occluded_pixels[current_occluder > 0] = 255
-
-    return occluded_pixels > 0
 
 
 def degrade_image(
@@ -229,7 +209,7 @@ def create_scene(
     background_path = background_paths[int(rng.integers(len(background_paths)))]
     scene = create_background(background_path, output_size, rng)
 
-    card_layers: list[tuple[np.ndarray, np.ndarray]] = []
+    card_layers: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
     card_count = int(rng.integers(1, 7))
 
     for _ in range(card_count):
@@ -243,17 +223,17 @@ def create_scene(
         if placed_card is None:
             continue
 
-        warped_card, card_mask, corners = placed_card
-        scene[card_mask] = warped_card[card_mask]
-        card_layers.append((card_mask, corners))
+        warped_card, full_mask, visible_mask, corners = placed_card
+        scene[visible_mask] = warped_card[visible_mask]
+        card_layers.append((full_mask, visible_mask, corners))
 
-    covered_pixels = add_occluders(scene, rng)
+    covered_pixels = np.zeros(scene.shape[:2], dtype=bool)
     labels: list[str] = []
 
     # Process cards from front to back. Cards added later cover earlier cards.
-    for card_mask, corners in reversed(card_layers):
-        card_area = np.count_nonzero(card_mask)
-        visible_area = np.count_nonzero(card_mask & ~covered_pixels)
+    for full_mask, visible_mask, corners in reversed(card_layers):
+        card_area = np.count_nonzero(full_mask)
+        visible_area = np.count_nonzero(visible_mask & ~covered_pixels)
         visible_fraction = visible_area / card_area
 
         if visible_fraction >= minimum_visible:
@@ -264,7 +244,7 @@ def create_scene(
             ]
             labels.append("0 " + " ".join(normalized_points))
 
-        covered_pixels |= card_mask
+        covered_pixels |= visible_mask
 
     return degrade_image(scene, rng), labels
 
