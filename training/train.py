@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parent
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="yolo26n-obb.pt")
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--patience", type=int, default=25)
     parser.add_argument("--size", type=int, default=1024)
     parser.add_argument("--batch", type=int, default=-1)
     parser.add_argument("--device", default=None)
@@ -24,6 +25,7 @@ def main() -> None:
     YOLO(args.model).train(
         data="briscola_obb.yaml",
         epochs=args.epochs,
+        patience=args.patience,
         imgsz=args.size,
         batch=args.batch,
         device=args.device,
