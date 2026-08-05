@@ -42,6 +42,12 @@ The two debug options can be used together.
 
 ## Build
 
+Install OpenCV. On Fedora:
+
+```sh
+sudo dnf install opencv-devel
+```
+
 ```sh
 cmake -S . -B build
 cmake --build build

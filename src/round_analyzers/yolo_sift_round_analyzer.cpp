@@ -1,16 +1,89 @@
 #include "briscola/round_analyzers/yolo_sift_round_analyzer.hpp"
 
+#include <opencv2/dnn/dnn.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace briscola {
 
+constexpr int modelSize = 1088;
+
+YoloCardDetector::YoloCardDetector(
+    const std::filesystem::path& model,
+    float confidence,
+    float nmsThreshold
+) : network_(cv::dnn::readNetFromONNX(model.string())),
+    confidence_(confidence),
+    nmsThreshold_(nmsThreshold) {}
+
 std::vector<CardBoundingBox> YoloCardDetector::detect(
     const cv::Mat& frame
-) const {
-    static_cast<void>(frame);
-    return {};
+) {
+    if (frame.empty()) {
+        throw std::invalid_argument("cannot detect cards in an empty frame");
+    }
+
+    const float scale = std::min(
+        static_cast<float>(modelSize) / frame.cols,
+        static_cast<float>(modelSize) / frame.rows
+    );
+    const int width = static_cast<int>(std::round(frame.cols * scale));
+    const int height = static_cast<int>(std::round(frame.rows * scale));
+    const int left = (modelSize - width) / 2;
+    const int top = (modelSize - height) / 2;
+
+    cv::Mat input(modelSize, modelSize, CV_8UC3, cv::Scalar(114, 114, 114));
+    cv::resize(frame, input(cv::Rect(left, top, width, height)), {width, height});
+
+    cv::Mat blob = cv::dnn::blobFromImage(
+        input,
+        1.0 / 255.0,
+        {},
+        {},
+        true
+    );
+    network_.setInput(blob);
+    const cv::Mat output = network_.forward();
+    if (output.dims != 3 || output.size[1] != 6) {
+        throw std::runtime_error("unexpected CardCaptor output shape");
+    }
+
+    const int count = output.size[2];
+    const float* values = output.ptr<float>();
+    std::vector<cv::RotatedRect> boxes;
+    std::vector<float> scores;
+
+    for (int index = 0; index < count; ++index) {
+        const float score = values[4 * count + index];
+        if (score < confidence_) continue;
+
+        boxes.emplace_back(
+            cv::Point2f{
+                (values[index] - left) / scale,
+                (values[count + index] - top) / scale
+            },
+            cv::Size2f{
+                values[2 * count + index] / scale,
+                values[3 * count + index] / scale
+            },
+            values[5 * count + index] * 180.0F / static_cast<float>(CV_PI)
+        );
+        scores.push_back(score);
+    }
+
+    std::vector<int> kept;
+    cv::dnn::NMSBoxes(boxes, scores, confidence_, nmsThreshold_, kept);
+
+    std::vector<CardBoundingBox> detections;
+    for (int index : kept) {
+        detections.push_back({boxes[index], scores[index]});
+    }
+
+    return detections;
 }
 
 std::optional<CardPrediction> SiftCardClassifier::classify(
@@ -27,12 +100,14 @@ RoundObservation RoundTemporalAggregator::aggregate(
     return {};
 }
 
+YoloSiftRoundAnalyzer::YoloSiftRoundAnalyzer(
+    const std::filesystem::path& model
+) : detector_(model) {}
+
 RoundObservation YoloSiftRoundAnalyzer::analyze(
     const std::filesystem::path& video,
     DebugSink* debug
 ) {
-    static_cast<void>(debug);
-
     cv::VideoCapture capture(video.string());
     if (!capture.isOpened()) {
         throw std::runtime_error("cannot open video: " + video.string());
@@ -43,11 +118,35 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
     int frameNumber = 0;
 
     while (capture.read(frame)) {
-        for (const CardBoundingBox& detection : detector_.detect(frame)) {
+        const auto frameDetections = detector_.detect(frame);
+
+        if (debug) {
+            cv::Mat annotated = frame.clone();
+            for (const CardBoundingBox& detection : frameDetections) {
+                cv::Point2f corners[4];
+                detection.box.points(corners);
+                for (int corner = 0; corner < 4; ++corner) {
+                    cv::line(
+                        annotated,
+                        corners[corner],
+                        corners[(corner + 1) % 4],
+                        {0, 255, 0},
+                        2
+                    );
+                }
+            }
+            debug->publish("yolo", frameNumber, annotated);
+        }
+
+        for (const CardBoundingBox& detection : frameDetections) {
+            const cv::Rect crop = detection.box.boundingRect() &
+                                  cv::Rect(0, 0, frame.cols, frame.rows);
+            if (crop.empty()) continue;
+
             detections.push_back({
                 frameNumber,
                 detection,
-                classifier_.classify(frame(detection.box))
+                classifier_.classify(frame(crop))
             });
         }
         ++frameNumber;

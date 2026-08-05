@@ -7,7 +7,9 @@
 
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
+#include <opencv2/dnn/dnn.hpp>
 
+#include <filesystem>
 #include <optional>
 #include <vector>
 
@@ -15,8 +17,8 @@ namespace briscola {
 
 /** @brief Generic card bounding box produced by YOLO. */
 struct CardBoundingBox {
-    cv::Rect box;      ///< Card position within the frame.
-    float confidence; ///< YOLO detection confidence.
+    cv::RotatedRect box; ///< Oriented card position within the frame.
+    float confidence;   ///< YOLO detection confidence.
 };
 
 /** @brief Classified card detection associated with one video frame. */
@@ -30,11 +32,28 @@ struct FrameCardDetection {
 class YoloCardDetector {
 public:
     /**
+     * @brief Load the CardCaptor ONNX model.
+     * @param model Path to `cardcaptor_v3_best.onnx`.
+     * @param confidence Minimum accepted detection confidence.
+     * @param nmsThreshold Maximum overlap retained by non-maximum suppression.
+     */
+    explicit YoloCardDetector(
+        const std::filesystem::path& model,
+        float confidence = 0.25F,
+        float nmsThreshold = 0.7F
+    );
+
+    /**
      * @brief Detect cards in a frame.
      * @param frame Source video frame.
      * @return Detected card bounding boxes contained within the frame.
      */
-    std::vector<CardBoundingBox> detect(const cv::Mat& frame) const;
+    std::vector<CardBoundingBox> detect(const cv::Mat& frame);
+
+private:
+    cv::dnn::Net network_; ///< Loaded CardCaptor network.
+    float confidence_;     ///< Minimum accepted confidence.
+    float nmsThreshold_;   ///< Maximum overlap retained by NMS.
 };
 
 /** @brief Classifies a cropped card using SIFT reference features. */
@@ -64,6 +83,12 @@ public:
 /** @brief Analyzes a round using YOLO detection and SIFT classification. */
 class YoloSiftRoundAnalyzer final : public IRoundAnalyzer {
 public:
+    /**
+     * @brief Construct the analyzer and load its detector model.
+     * @param model Path to `cardcaptor_v3_best.onnx`.
+     */
+    explicit YoloSiftRoundAnalyzer(const std::filesystem::path& model);
+
     /** @copydoc IRoundAnalyzer::analyze */
     RoundObservation analyze(
         const std::filesystem::path& video,

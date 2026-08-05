@@ -3,3 +3,5 @@
 /compile_commands.json
 /docs/
 /data/
+/models/*.onnx
+/debug/
