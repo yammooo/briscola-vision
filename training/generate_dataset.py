@@ -46,12 +46,11 @@ def create_background(
     if image is None:
         raise RuntimeError(f"cannot read background: {image_path}")
 
-    # Resize until the image is large enough for a random square crop.
     scale = max(
         output_size / image.shape[0],
         output_size / image.shape[1],
     )
-    scale *= rng.uniform(1.0, 1.3)
+    scale *= rng.uniform(0.35, 1.3)
 
     image = cv2.resize(
         image,
@@ -59,6 +58,17 @@ def create_background(
         fx=scale,
         fy=scale,
         interpolation=cv2.INTER_LINEAR,
+    )
+
+    padding_y = max(output_size - image.shape[0], 0)
+    padding_x = max(output_size - image.shape[1], 0)
+    image = cv2.copyMakeBorder(
+        image,
+        padding_y // 2,
+        padding_y - padding_y // 2,
+        padding_x // 2,
+        padding_x - padding_x // 2,
+        cv2.BORDER_REFLECT_101,
     )
 
     max_top = image.shape[0] - output_size

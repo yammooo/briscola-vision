@@ -2,7 +2,7 @@
 /cmake-build-*/
 /compile_commands.json
 /docs/
-/data/
+data/
 /models/*.onnx
 *.pt
 /debug/
