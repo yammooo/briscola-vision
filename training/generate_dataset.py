@@ -10,7 +10,9 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CARD_DIRECTORY = PROJECT_ROOT / "data" / "Briscola_Trentine"
-BACKGROUND_DIRECTORY = Path(__file__).resolve().parent / "background" / "dtd"
+TRAINING_DATA = Path(__file__).resolve().parent / "data"
+BACKGROUND_DIRECTORY = TRAINING_DATA / "background" / "dtd"
+CARD_BACK_DIRECTORY = TRAINING_DATA / "card_backs"
 
 ALLOWED_TEXTURES = {
     "banded",
@@ -213,6 +215,7 @@ def degrade_image(
 
 def create_scene(
     card_paths: list[Path],
+    card_back_paths: list[Path],
     background_paths: list[Path],
     output_size: int,
     minimum_visible: float,
@@ -241,7 +244,23 @@ def create_scene(
         scene[visible_mask] = warped_card[visible_mask]
         card_layers.append((full_mask, visible_mask, corners))
 
+    back_masks = []
+    for _ in range(rng.integers(1, 4)):
+        back = cv2.imread(str(card_back_paths[int(rng.integers(len(card_back_paths)))]))
+        if back is None:
+            raise RuntimeError("cannot read card back")
+
+        placed_back = place_card(back, output_size, (0.0, 0.0), rng)
+        if placed_back is None:
+            continue
+
+        warped_back, _, visible_mask, _ = placed_back
+        scene[visible_mask] = warped_back[visible_mask]
+        back_masks.append(visible_mask)
+
     covered_pixels = np.zeros(scene.shape[:2], dtype=bool)
+    for mask in back_masks:
+        covered_pixels |= mask
     labels: list[str] = []
 
     # Process cards from front to back. Cards added later cover earlier cards.
@@ -274,6 +293,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--cards", type=Path, default=CARD_DIRECTORY)
     parser.add_argument("--backgrounds", type=Path, default=BACKGROUND_DIRECTORY)
+    parser.add_argument("--backs", type=Path, default=CARD_BACK_DIRECTORY)
     parser.add_argument(
         "--output",
         type=Path,
@@ -288,6 +308,7 @@ def main() -> None:
         for path in find_images(args.backgrounds)
         if path.parent.name in ALLOWED_TEXTURES
     ]
+    card_back_paths = find_images(args.backs)
 
     if not card_paths:
         raise RuntimeError(f"no card scans found in: {args.cards.resolve()}")
@@ -297,6 +318,8 @@ def main() -> None:
             f"{args.backgrounds.resolve()}\n"
             f"expected folders: {', '.join(sorted(ALLOWED_TEXTURES))}"
         )
+    if not card_back_paths:
+        raise RuntimeError(f"no card backs found in: {args.backs.resolve()}")
 
     if args.output.exists():
         if not args.overwrite:
@@ -317,6 +340,7 @@ def main() -> None:
         for _ in range(50):
             scene, labels = create_scene(
                 card_paths,
+                card_back_paths,
                 background_paths,
                 args.size,
                 args.min_visible,
