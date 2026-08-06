@@ -32,8 +32,8 @@ struct FrameCardDetection {
 class YoloCardDetector {
 public:
     /**
-     * @brief Load the CardCaptor ONNX model.
-     * @param model Path to `cardcaptor_v3_best.onnx`.
+     * @brief Load the Briscola card ONNX model.
+     * @param model Path to `briscola_cards.onnx`.
      * @param confidence Minimum accepted detection confidence.
      * @param nmsThreshold Maximum overlap retained by non-maximum suppression.
      */
@@ -51,7 +51,7 @@ public:
     std::vector<CardBoundingBox> detect(const cv::Mat& frame);
 
 private:
-    cv::dnn::Net network_; ///< Loaded CardCaptor network.
+    cv::dnn::Net network_; ///< Loaded YOLO network.
     float confidence_;     ///< Minimum accepted confidence.
     float nmsThreshold_;   ///< Maximum overlap retained by NMS.
 };
@@ -85,7 +85,7 @@ class YoloSiftRoundAnalyzer final : public IRoundAnalyzer {
 public:
     /**
      * @brief Construct the analyzer and load its detector model.
-     * @param model Path to `cardcaptor_v3_best.onnx`.
+     * @param model Path to `briscola_cards.onnx`.
      */
     explicit YoloSiftRoundAnalyzer(const std::filesystem::path& model);
 

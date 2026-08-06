@@ -4,9 +4,11 @@
 /docs/
 /data/
 /models/*.onnx
+*.pt
 /debug/
 /training/background/
 /training/dataset/
 /training/runs/
 __pycache__/
 .vscode/
+*csv

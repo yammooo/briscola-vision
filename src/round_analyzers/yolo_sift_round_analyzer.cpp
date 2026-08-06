@@ -10,7 +10,7 @@
 
 namespace briscola {
 
-constexpr int modelSize = 1088;
+constexpr int modelSize = 1024;
 
 YoloCardDetector::YoloCardDetector(
     const std::filesystem::path& model,
@@ -49,7 +49,7 @@ std::vector<CardBoundingBox> YoloCardDetector::detect(
     network_.setInput(blob);
     const cv::Mat output = network_.forward();
     if (output.dims != 3 || output.size[1] != 6) {
-        throw std::runtime_error("unexpected CardCaptor output shape");
+        throw std::runtime_error("unexpected YOLO OBB output shape");
     }
 
     const int count = output.size[2];
@@ -118,6 +118,11 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
     int frameNumber = 0;
 
     while (capture.read(frame)) {
+        if (frameNumber % 5 != 0) {
+            ++frameNumber;
+            continue;
+        }
+
         const auto frameDetections = detector_.detect(frame);
 
         if (debug) {

@@ -33,11 +33,11 @@ if(BUILD_TESTING)
 
     add_executable(yolo_detector_smoke tests/yolo_card_detector_smoke.cpp)
     target_link_libraries(yolo_detector_smoke PRIVATE briscola)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/models/cardcaptor_v3_best.onnx")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/models/briscola_cards.onnx")
         add_test(
             NAME yolo_detector_smoke
             COMMAND yolo_detector_smoke
-                "${CMAKE_SOURCE_DIR}/models/cardcaptor_v3_best.onnx"
+                "${CMAKE_SOURCE_DIR}/models/briscola_cards.onnx"
                 "${CMAKE_SOURCE_DIR}/data/Briscola_Trentine/1-clubs.JPG"
         )
     endif()
