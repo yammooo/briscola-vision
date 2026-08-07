@@ -3,11 +3,13 @@
 
 /** @file yolo_sift_round_analyzer.hpp @brief YOLO and SIFT round analyzer. */
 
+#include "briscola/io.hpp"
 #include "briscola/pipeline.hpp"
 
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/dnn/dnn.hpp>
+#include <opencv2/features2d.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -20,15 +22,6 @@ struct CardBoundingBox {
     cv::RotatedRect box; ///< Oriented card position within the frame.
     float confidence;   ///< YOLO detection confidence.
 };
-
-/** @brief Return the weighted SIFT descriptor and keypoint-position cost. */
-float siftMatchingCost(
-    const cv::Mat& firstDescriptor,
-    const cv::Point2f& firstPosition,
-    const cv::Mat& secondDescriptor,
-    const cv::Point2f& secondPosition,
-    float positionWeight
-);
 
 /** @brief Classified card detection associated with one video frame. */
 struct FrameCardDetection {
@@ -69,11 +62,28 @@ private:
 class SiftCardClassifier {
 public:
     /**
+     * @brief Precompute SIFT features for the reference images.
+     * @param references Labelled reference card images.
+     */
+    explicit SiftCardClassifier(const std::vector<CardReference>& references);
+
+    /**
      * @brief Classify one cropped card image.
      * @param cardImage Image containing one detected card.
      * @return Card prediction, or empty when no reliable match exists.
      */
-    std::optional<CardPrediction> classify(const cv::Mat& cardImage) const;
+    std::optional<CardPrediction> classify(const cv::Mat& cardImage);
+
+private:
+    /** @brief SIFT data precomputed for one reference card. */
+    struct ReferenceCard {
+        Card card;                           ///< Card represented by the image.
+        std::vector<cv::KeyPoint> keypoints; ///< Reference feature positions.
+        cv::Mat descriptors;                 ///< Reference SIFT descriptors.
+    };
+
+    cv::Ptr<cv::SIFT> sift_;                 ///< Shared SIFT feature extractor.
+    std::vector<ReferenceCard> references_;  ///< All available reference cards.
 };
 
 /** @brief Converts frame detections into one round observation. */
@@ -95,8 +105,12 @@ public:
     /**
      * @brief Construct the analyzer and load its detector model.
      * @param model Path to `briscola_cards.onnx`.
+     * @param references Labelled card reference images.
      */
-    explicit YoloSiftRoundAnalyzer(const std::filesystem::path& model);
+    YoloSiftRoundAnalyzer(
+        const std::filesystem::path& model,
+        const std::vector<CardReference>& references
+    );
 
     /** @copydoc IRoundAnalyzer::analyze */
     RoundObservation analyze(

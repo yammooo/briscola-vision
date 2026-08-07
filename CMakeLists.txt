@@ -4,7 +4,7 @@ project(briscola_vision LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED COMPONENTS core dnn highgui imgcodecs imgproc videoio)
+find_package(OpenCV REQUIRED COMPONENTS core dnn features2d highgui imgcodecs imgproc videoio)
 
 add_library(briscola
     src/app.cpp
@@ -38,6 +38,17 @@ if(BUILD_TESTING)
             NAME yolo_detector_smoke
             COMMAND yolo_detector_smoke
                 "${CMAKE_SOURCE_DIR}/models/briscola_cards.onnx"
+                "${CMAKE_SOURCE_DIR}/data/Briscola_Trentine/1-clubs.JPG"
+        )
+    endif()
+
+    if(EXISTS "${CMAKE_SOURCE_DIR}/data/Briscola_Trentine/1-clubs.JPG")
+        add_executable(sift_card_classifier_smoke tests/sift_card_classifier_smoke.cpp)
+        target_link_libraries(sift_card_classifier_smoke PRIVATE briscola)
+        add_test(
+            NAME sift_card_classifier_smoke
+            COMMAND sift_card_classifier_smoke
+                "${CMAKE_SOURCE_DIR}/data/Briscola_Trentine"
                 "${CMAKE_SOURCE_DIR}/data/Briscola_Trentine/1-clubs.JPG"
         )
     endif()

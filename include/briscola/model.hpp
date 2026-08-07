@@ -39,7 +39,7 @@ struct Card {
 /** @brief Card predicted by the vision pipeline. */
 struct CardPrediction {
     Card card;        ///< Predicted card.
-    float confidence; ///< Detector confidence score.
+    float confidence; ///< Prediction confidence score.
 };
 
 /** @brief Possibly incomplete vision output for one round. */

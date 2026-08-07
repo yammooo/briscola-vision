@@ -1,16 +1,23 @@
 #include "briscola/round_analyzers/yolo_sift_round_analyzer.hpp"
 
 #include <opencv2/dnn/dnn.hpp>
+#include <opencv2/features2d.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace briscola {
 
 constexpr int modelSize = 1024;
+constexpr int cardWidth = 581;
+constexpr int cardHeight = 315;
+constexpr float positionWeight = 0.001F;
+constexpr float loweRatio = 0.75F;
+constexpr int minimumMatches = 8;
 
 float siftMatchingCost(
     const cv::Mat& firstDescriptor,
@@ -22,6 +29,30 @@ float siftMatchingCost(
     const cv::Point2f positionDifference = firstPosition - secondPosition;
     return static_cast<float>(cv::norm(firstDescriptor, secondDescriptor)) +
            positionWeight * positionDifference.dot(positionDifference);
+}
+
+cv::Mat rectifyCard(const cv::Mat& frame, const cv::RotatedRect& box) {
+    cv::Point2f points[4];
+    box.points(points);
+
+    if (cv::norm(points[0] - points[1]) < cv::norm(points[1] - points[2])) {
+        std::rotate(points, points + 1, points + 4);
+    }
+
+    const cv::Point2f target[] = {
+        {0.0F, 0.0F},
+        {static_cast<float>(cardWidth - 1), 0.0F},
+        {static_cast<float>(cardWidth - 1), static_cast<float>(cardHeight - 1)},
+        {0.0F, static_cast<float>(cardHeight - 1)}
+    };
+    cv::Mat card;
+    cv::warpPerspective(
+        frame,
+        card,
+        cv::getPerspectiveTransform(points, target),
+        {cardWidth, cardHeight}
+    );
+    return card;
 }
 
 YoloCardDetector::YoloCardDetector(
@@ -98,11 +129,79 @@ std::vector<CardBoundingBox> YoloCardDetector::detect(
     return detections;
 }
 
+SiftCardClassifier::SiftCardClassifier(
+    const std::vector<CardReference>& references
+) : sift_(cv::SIFT::create()) {
+    for (const CardReference& card : references) {
+        ReferenceCard reference{card.card, {}, {}};
+        sift_->detectAndCompute(card.image, cv::noArray(), reference.keypoints, reference.descriptors);
+        if (!reference.descriptors.empty()) references_.push_back(std::move(reference));
+    }
+
+    if (references_.empty()) {
+        throw std::runtime_error("no usable reference cards");
+    }
+}
+
 std::optional<CardPrediction> SiftCardClassifier::classify(
     const cv::Mat& cardImage
-) const {
-    static_cast<void>(cardImage);
-    return std::nullopt;
+) {
+    if (cardImage.empty()) return std::nullopt;
+
+    CardPrediction bestPrediction{};
+    int bestMatchCount = 0;
+    float bestMedianCost = 0.0F;
+
+    for (int rotation : {0, 180}) {
+        cv::Mat image = cardImage;
+        if (rotation == 180) cv::rotate(cardImage, image, cv::ROTATE_180);
+
+        std::vector<cv::KeyPoint> queryKeypoints;
+        cv::Mat queryDescriptors;
+        sift_->detectAndCompute(image, cv::noArray(), queryKeypoints, queryDescriptors);
+        if (queryDescriptors.empty()) continue;
+
+        for (const ReferenceCard& reference : references_) {
+            std::vector<float> acceptedCosts;
+            for (int queryIndex = 0; queryIndex < queryDescriptors.rows; ++queryIndex) {
+                float bestCost = std::numeric_limits<float>::max();
+                float secondCost = std::numeric_limits<float>::max();
+                for (int referenceIndex = 0; referenceIndex < reference.descriptors.rows; ++referenceIndex) {
+                    const float cost = siftMatchingCost(
+                        queryDescriptors.row(queryIndex),
+                        queryKeypoints[queryIndex].pt,
+                        reference.descriptors.row(referenceIndex),
+                        reference.keypoints[referenceIndex].pt,
+                        positionWeight
+                    );
+                    if (cost < bestCost) {
+                        secondCost = bestCost;
+                        bestCost = cost;
+                    } else if (cost < secondCost) {
+                        secondCost = cost;
+                    }
+                }
+                if (bestCost < loweRatio * secondCost) acceptedCosts.push_back(bestCost);
+            }
+
+            if (acceptedCosts.empty()) continue;
+            std::sort(acceptedCosts.begin(), acceptedCosts.end());
+            const float medianCost = acceptedCosts[acceptedCosts.size() / 2];
+            const int matchCount = static_cast<int>(acceptedCosts.size());
+            if (matchCount > bestMatchCount ||
+                (matchCount == bestMatchCount && medianCost < bestMedianCost)) {
+                bestPrediction = {
+                    reference.card,
+                    static_cast<float>(matchCount) / queryDescriptors.rows
+                };
+                bestMatchCount = matchCount;
+                bestMedianCost = medianCost;
+            }
+        }
+    }
+
+    if (bestMatchCount < minimumMatches) return std::nullopt;
+    return bestPrediction;
 }
 
 RoundObservation RoundTemporalAggregator::aggregate(
@@ -113,8 +212,9 @@ RoundObservation RoundTemporalAggregator::aggregate(
 }
 
 YoloSiftRoundAnalyzer::YoloSiftRoundAnalyzer(
-    const std::filesystem::path& model
-) : detector_(model) {}
+    const std::filesystem::path& model,
+    const std::vector<CardReference>& references
+) : detector_(model), classifier_(references) {}
 
 RoundObservation YoloSiftRoundAnalyzer::analyze(
     const std::filesystem::path& video,
@@ -156,14 +256,10 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
         }
 
         for (const CardBoundingBox& detection : frameDetections) {
-            const cv::Rect crop = detection.box.boundingRect() &
-                                  cv::Rect(0, 0, frame.cols, frame.rows);
-            if (crop.empty()) continue;
-
             detections.push_back({
                 frameNumber,
                 detection,
-                classifier_.classify(frame(crop))
+                classifier_.classify(rectifyCard(frame, detection.box))
             });
         }
         ++frameNumber;
