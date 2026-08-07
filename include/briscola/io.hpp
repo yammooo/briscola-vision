@@ -1,15 +1,33 @@
 #ifndef BRISCOLA_IO_HPP
 #define BRISCOLA_IO_HPP
 
-/** @file io.hpp @brief Game video discovery and result serialization. */
+/** @file io.hpp @brief Project file input and output. */
 
 #include "briscola/model.hpp"
+
+#include <opencv2/core/mat.hpp>
 
 #include <filesystem>
 #include <iosfwd>
 #include <vector>
 
 namespace briscola {
+
+/** @brief One labelled card reference image. */
+struct CardReference {
+    Card card;     ///< Card represented by the image.
+    cv::Mat image; ///< Grayscale reference scan.
+};
+
+/**
+ * @brief Read the 40 `RANK-SUIT.JPG` reference scans.
+ * @param folder Directory containing the reference scans.
+ * @return Labelled grayscale card images.
+ * @throws std::runtime_error If the reference set is invalid.
+ */
+std::vector<CardReference> readCardReferences(
+    const std::filesystem::path& folder
+);
 
 /**
  * @brief Find and numerically sort rounds 1 through 20.

@@ -1,5 +1,7 @@
 #include "briscola/io.hpp"
 
+#include <opencv2/imgcodecs.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <ostream>
@@ -39,6 +41,43 @@ static Suit parseSuit(const std::string& value) {
     if (value == "clubs") return Suit::Clubs;
     if (value == "spades") return Suit::Spades;
     throw std::runtime_error("invalid suit: " + value);
+}
+
+std::vector<CardReference> readCardReferences(
+    const std::filesystem::path& folder
+) {
+    if (!std::filesystem::is_directory(folder)) {
+        throw std::runtime_error("invalid card reference folder: " + folder.string());
+    }
+
+    std::vector<std::filesystem::path> paths;
+    for (const auto& entry : std::filesystem::directory_iterator(folder)) {
+        if (entry.is_regular_file()) paths.push_back(entry.path());
+    }
+    std::sort(paths.begin(), paths.end());
+
+    std::vector<CardReference> references;
+    for (const auto& path : paths) {
+        const std::string name = path.stem().string();
+        const std::size_t separator = name.find('-');
+        if (separator == std::string::npos) {
+            throw std::runtime_error("invalid reference card name: " + path.string());
+        }
+
+        cv::Mat image = cv::imread(path.string(), cv::IMREAD_GRAYSCALE);
+        if (image.empty()) {
+            throw std::runtime_error("cannot read reference card: " + path.string());
+        }
+        references.push_back({
+            {std::stoi(name.substr(0, separator)), parseSuit(name.substr(separator + 1))},
+            std::move(image)
+        });
+    }
+
+    if (references.size() != 40) {
+        throw std::runtime_error("card reference folder must contain 40 images");
+    }
+    return references;
 }
 
 static Player parsePlayer(const std::string& value) {

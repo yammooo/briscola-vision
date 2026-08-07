@@ -16,27 +16,17 @@ Only the replaceable vision decisions are interfaces. Rules, orchestration, I/O,
 
 Debugging uses the same optional `DebugSink` parameter for every pipeline. An analyzer publishes annotated images without deciding how they are presented; the sink can save them, display them, or do both. Passing `nullptr` disables debugging and must not change analysis results.
 
-## Application wiring
+The first concrete round analyzer is `YoloSiftRoundAnalyzer`: YOLO produces generic card boxes, SIFT classifies each crop, and `RoundTemporalAggregator` combines the resulting frame detections into a round observation.
 
-`runApplication` contains the common command-line flow. A concrete application only constructs its selected implementations and passes them in:
-
-```cpp
-int main(int argc, char* argv[]) {
-    MyRoundAnalyzer analyzer;
-    MyBriscolaProvider provider;
-    return briscola::runApplication(argc, argv, analyzer, provider);
-}
-```
-
-The command line is:
-
-```text
-APP GAME_FOLDER OUTPUT_CSV [--debug-window] [--debug-dir DIRECTORY]
-```
-
-The two debug options can be used together.
+`MostFrequentBriscolaProvider` selects the candidate reported by the most rounds, using the earliest candidate when counts are tied.
 
 ## Build
+
+Install OpenCV. On Fedora:
+
+```sh
+sudo dnf install opencv-devel
+```
 
 ```sh
 cmake -S . -B build

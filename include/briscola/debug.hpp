@@ -16,30 +16,39 @@ class DebugSink {
 public:
     /**
      * @brief Configure diagnostic image output.
-     * @param directory Destination directory, or empty to disable saving.
-     * @param showWindow Whether to display images in OpenCV windows.
+     * @param directory Destination directory for diagnostic files.
+     * @param writeFiles Whether every image is saved.
+     * @param showWindow Whether every image is displayed.
      * @throws std::runtime_error If the directory cannot be created.
      */
     explicit DebugSink(
         std::filesystem::path directory = {},
+        bool writeFiles = false,
         bool showWindow = false
     );
 
     /**
      * @brief Publish one diagnostic image.
      * @param stage Analyzer-defined processing stage.
+     * @param source Source video name used in file output.
      * @param frameNumber Zero-based source frame number.
      * @param image Image to display or store.
+     * @param writeFile Whether to save this image.
+     * @param showWindow Whether to display this image.
      */
     void publish(
         std::string_view stage,
+        std::string_view source,
         int frameNumber,
-        const cv::Mat& image
+        const cv::Mat& image,
+        bool writeFile = false,
+        bool showWindow = false
     );
 
 private:
-    std::filesystem::path directory_;  ///< Empty when file output is disabled.
-    bool showWindow_;                  ///< Whether window output is enabled.
+    std::filesystem::path directory_;  ///< Destination for diagnostic files.
+    bool writeFiles_;                   ///< Whether every image is saved.
+    bool showWindow_;                   ///< Whether every image is displayed.
     std::size_t imageNumber_ = 0;      ///< Sequence number preventing collisions.
 };
 
