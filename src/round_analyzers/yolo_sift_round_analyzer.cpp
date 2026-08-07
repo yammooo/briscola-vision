@@ -1,5 +1,6 @@
 #include "briscola/round_analyzers/yolo_sift_round_analyzer.hpp"
 
+#include <opencv2/core/cuda.hpp>
 #include <opencv2/dnn/dnn.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/core/utility.hpp>
@@ -62,7 +63,12 @@ YoloCardDetector::YoloCardDetector(
     float nmsThreshold
 ) : network_(cv::dnn::readNetFromONNX(model.string())),
     confidence_(confidence),
-    nmsThreshold_(nmsThreshold) {}
+    nmsThreshold_(nmsThreshold) {
+    if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
+        network_.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+        network_.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+    }
+}
 
 std::vector<CardBoundingBox> YoloCardDetector::detect(
     const cv::Mat& frame

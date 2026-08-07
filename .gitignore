@@ -1,5 +1,13 @@
 /build/
+/build-cuda/
 /cmake-build-*/
+/opencv-src/
+/opencv-contrib-src/
+/opencv-build/
+/opencv-build-msvc/
+/opencv-install/
+opencv-build-*.log
+opencv-build-*.err.log
 /compile_commands.json
 /docs/
 data/
@@ -13,3 +21,4 @@ data/
 __pycache__/
 .vscode/
 *csv
+CMakePresets.json
