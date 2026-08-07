@@ -38,7 +38,7 @@ int runApplication(
             }
         }
 
-        DebugSink debug(debugDirectory, showWindow);
+        DebugSink debug(debugDirectory, !debugDirectory.empty(), showWindow);
         GameRunner runner(roundAnalyzer, briscolaProvider);
         const GameResult result = runner.run(
             argv[1],

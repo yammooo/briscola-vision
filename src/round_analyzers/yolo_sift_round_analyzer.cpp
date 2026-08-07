@@ -299,7 +299,7 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
         }
 
         if (debug) {
-            debug->publish("yolo", frameNumber, annotated);
+            debug->publish("yolo", video.stem().string(), frameNumber, annotated);
         }
         ++frameNumber;
     }
