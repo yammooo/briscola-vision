@@ -3,11 +3,16 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace briscola {
+
+constexpr int maximumWindowWidth = 1000;
+constexpr int maximumWindowHeight = 700;
 
 DebugSink::DebugSink(std::filesystem::path directory, bool showWindow)
     : directory_(std::move(directory)), showWindow_(showWindow) {
@@ -35,7 +40,19 @@ void DebugSink::publish(
         }
     }
     if (showWindow_) {
-        cv::imshow(std::string(stage), image);
+        const std::string windowName(stage);
+        const double scale = std::min({
+            1.0,
+            static_cast<double>(maximumWindowWidth) / image.cols,
+            static_cast<double>(maximumWindowHeight) / image.rows
+        });
+        cv::namedWindow(windowName, cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO);
+        cv::resizeWindow(
+            windowName,
+            static_cast<int>(std::round(image.cols * scale)),
+            static_cast<int>(std::round(image.rows * scale))
+        );
+        cv::imshow(windowName, image);
         cv::waitKey(1);
     }
 }

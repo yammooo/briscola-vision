@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace briscola {
 
@@ -237,9 +238,14 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
 
         const auto frameDetections = detector_.detect(frame);
 
-        if (debug) {
-            cv::Mat annotated = frame.clone();
-            for (const CardBoundingBox& detection : frameDetections) {
+        cv::Mat annotated;
+        if (debug) annotated = frame.clone();
+
+        for (const CardBoundingBox& detection : frameDetections) {
+            const auto prediction = classifier_.classify(rectifyCard(frame, detection.box));
+            detections.push_back({frameNumber, detection, prediction});
+
+            if (debug) {
                 cv::Point2f corners[4];
                 detection.box.points(corners);
                 for (int corner = 0; corner < 4; ++corner) {
@@ -251,16 +257,29 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
                         2
                     );
                 }
+
+                std::string label = "unknown";
+                if (prediction) {
+                    const char* suit = prediction->card.suit == Suit::Cups   ? "cups"
+                                       : prediction->card.suit == Suit::Coins ? "coins"
+                                       : prediction->card.suit == Suit::Clubs ? "clubs"
+                                                                              : "spades";
+                    label = std::to_string(prediction->card.rank) + "-" + suit;
+                }
+                cv::putText(
+                    annotated,
+                    label,
+                    detection.box.boundingRect().tl(),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    {0, 255, 0},
+                    2
+                );
             }
-            debug->publish("yolo", frameNumber, annotated);
         }
 
-        for (const CardBoundingBox& detection : frameDetections) {
-            detections.push_back({
-                frameNumber,
-                detection,
-                classifier_.classify(rectifyCard(frame, detection.box))
-            });
+        if (debug) {
+            debug->publish("yolo", frameNumber, annotated);
         }
         ++frameNumber;
     }
