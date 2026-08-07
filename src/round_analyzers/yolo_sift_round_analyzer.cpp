@@ -132,7 +132,7 @@ std::vector<CardBoundingBox> YoloCardDetector::detect(
 
 SiftCardClassifier::SiftCardClassifier(
     const std::vector<CardReference>& references
-) : sift_(cv::SIFT::create()) {
+) : sift_(cv::SIFT::create(400)) {
     for (const CardReference& card : references) {
         ReferenceCard reference{card.card, {}, {}};
         sift_->detectAndCompute(card.image, cv::noArray(), reference.keypoints, reference.descriptors);
