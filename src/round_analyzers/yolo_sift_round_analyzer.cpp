@@ -19,19 +19,17 @@ constexpr int modelSize = 1024;
 constexpr int cardWidth = 581;
 constexpr int cardHeight = 315;
 constexpr float positionWeight = 0.01F;
+constexpr float maximumPositionDistance = 120.0F;
 constexpr float loweRatio = 0.75F;
 constexpr int minimumMatches = 8;
 
 float siftMatchingCost(
     const cv::Mat& firstDescriptor,
-    const cv::Point2f& firstPosition,
     const cv::Mat& secondDescriptor,
-    const cv::Point2f& secondPosition,
-    float positionWeight
+    float positionSquared
 ) {
-    const cv::Point2f positionDifference = firstPosition - secondPosition;
     return static_cast<float>(cv::norm(firstDescriptor, secondDescriptor)) +
-           positionWeight * positionDifference.dot(positionDifference);
+           positionWeight * positionSquared;
 }
 
 cv::Mat rectifyCard(const cv::Mat& frame, const cv::RotatedRect& box) {
@@ -134,7 +132,7 @@ std::vector<CardBoundingBox> YoloCardDetector::detect(
 
 SiftCardClassifier::SiftCardClassifier(
     const std::vector<CardReference>& references
-) : sift_(cv::SIFT::create(800)) {
+) : sift_(cv::SIFT::create(500)) {
     for (const CardReference& card : references) {
         ReferenceCard reference{card.card, {}, {}};
         sift_->detectAndCompute(card.image, cv::noArray(), reference.keypoints, reference.descriptors);
@@ -174,12 +172,18 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
                         float bestCost = std::numeric_limits<float>::max();
                         float secondCost = std::numeric_limits<float>::max();
                         for (int referenceIndex = 0; referenceIndex < reference.descriptors.rows; ++referenceIndex) {
+                            const cv::Point2f difference =
+                                queryKeypoints[queryIndex].pt -
+                                reference.keypoints[referenceIndex].pt;
+                            const float positionSquared = difference.dot(difference);
+                            if (positionSquared >
+                                maximumPositionDistance * maximumPositionDistance) {
+                                continue;
+                            }
                             const float cost = siftMatchingCost(
                                 queryDescriptors.row(queryIndex),
-                                queryKeypoints[queryIndex].pt,
                                 reference.descriptors.row(referenceIndex),
-                                reference.keypoints[referenceIndex].pt,
-                                positionWeight
+                                positionSquared
                             );
                             if (cost < bestCost) {
                                 secondCost = bestCost;
