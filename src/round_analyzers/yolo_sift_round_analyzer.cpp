@@ -2,6 +2,7 @@
 
 #include <opencv2/dnn/dnn.hpp>
 #include <opencv2/features2d.hpp>
+#include <opencv2/core/utility.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
@@ -10,13 +11,14 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace briscola {
 
 constexpr int modelSize = 1024;
 constexpr int cardWidth = 581;
 constexpr int cardHeight = 315;
-constexpr float positionWeight = 0.001F;
+constexpr float positionWeight = 0.01F;
 constexpr float loweRatio = 0.75F;
 constexpr int minimumMatches = 8;
 
@@ -132,7 +134,7 @@ std::vector<CardBoundingBox> YoloCardDetector::detect(
 
 SiftCardClassifier::SiftCardClassifier(
     const std::vector<CardReference>& references
-) : sift_(cv::SIFT::create(400)) {
+) : sift_(cv::SIFT::create(800)) {
     for (const CardReference& card : references) {
         ReferenceCard reference{card.card, {}, {}};
         sift_->detectAndCompute(card.image, cv::noArray(), reference.keypoints, reference.descriptors);
@@ -162,37 +164,51 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
         sift_->detectAndCompute(image, cv::noArray(), queryKeypoints, queryDescriptors);
         if (queryDescriptors.empty()) continue;
 
-        for (const ReferenceCard& reference : references_) {
-            std::vector<float> acceptedCosts;
-            for (int queryIndex = 0; queryIndex < queryDescriptors.rows; ++queryIndex) {
-                float bestCost = std::numeric_limits<float>::max();
-                float secondCost = std::numeric_limits<float>::max();
-                for (int referenceIndex = 0; referenceIndex < reference.descriptors.rows; ++referenceIndex) {
-                    const float cost = siftMatchingCost(
-                        queryDescriptors.row(queryIndex),
-                        queryKeypoints[queryIndex].pt,
-                        reference.descriptors.row(referenceIndex),
-                        reference.keypoints[referenceIndex].pt,
-                        positionWeight
-                    );
-                    if (cost < bestCost) {
-                        secondCost = bestCost;
-                        bestCost = cost;
-                    } else if (cost < secondCost) {
-                        secondCost = cost;
+        std::vector<std::pair<int, float>> scores(references_.size());
+        cv::parallel_for_(cv::Range(0, static_cast<int>(references_.size())),
+            [&](const cv::Range& range) {
+                for (int cardIndex = range.start; cardIndex < range.end; ++cardIndex) {
+                    const ReferenceCard& reference = references_[cardIndex];
+                    std::vector<float> acceptedCosts;
+                    for (int queryIndex = 0; queryIndex < queryDescriptors.rows; ++queryIndex) {
+                        float bestCost = std::numeric_limits<float>::max();
+                        float secondCost = std::numeric_limits<float>::max();
+                        for (int referenceIndex = 0; referenceIndex < reference.descriptors.rows; ++referenceIndex) {
+                            const float cost = siftMatchingCost(
+                                queryDescriptors.row(queryIndex),
+                                queryKeypoints[queryIndex].pt,
+                                reference.descriptors.row(referenceIndex),
+                                reference.keypoints[referenceIndex].pt,
+                                positionWeight
+                            );
+                            if (cost < bestCost) {
+                                secondCost = bestCost;
+                                bestCost = cost;
+                            } else if (cost < secondCost) {
+                                secondCost = cost;
+                            }
+                        }
+                        if (bestCost < loweRatio * secondCost) acceptedCosts.push_back(bestCost);
+                    }
+
+                    if (!acceptedCosts.empty()) {
+                        std::sort(acceptedCosts.begin(), acceptedCosts.end());
+                        scores[cardIndex] = {
+                            static_cast<int>(acceptedCosts.size()),
+                            acceptedCosts[acceptedCosts.size() / 2]
+                        };
                     }
                 }
-                if (bestCost < loweRatio * secondCost) acceptedCosts.push_back(bestCost);
             }
+        );
 
-            if (acceptedCosts.empty()) continue;
-            std::sort(acceptedCosts.begin(), acceptedCosts.end());
-            const float medianCost = acceptedCosts[acceptedCosts.size() / 2];
-            const int matchCount = static_cast<int>(acceptedCosts.size());
+        for (std::size_t cardIndex = 0; cardIndex < references_.size(); ++cardIndex) {
+            const int matchCount = scores[cardIndex].first;
+            const float medianCost = scores[cardIndex].second;
             if (matchCount > bestMatchCount ||
                 (matchCount == bestMatchCount && medianCost < bestMedianCost)) {
                 bestPrediction = {
-                    reference.card,
+                    references_[cardIndex].card,
                     static_cast<float>(matchCount) / queryDescriptors.rows
                 };
                 bestMatchCount = matchCount;
