@@ -20,26 +20,6 @@ The first concrete round analyzer is `YoloSiftRoundAnalyzer`: YOLO produces gene
 
 `MostFrequentBriscolaProvider` selects the candidate reported by the most rounds, using the earliest candidate when counts are tied.
 
-## Application wiring
-
-`runApplication` contains the common command-line flow. A concrete application only constructs its selected implementations and passes them in:
-
-```cpp
-int main(int argc, char* argv[]) {
-    MyRoundAnalyzer analyzer;
-    MyBriscolaProvider provider;
-    return briscola::runApplication(argc, argv, analyzer, provider);
-}
-```
-
-The command line is:
-
-```text
-APP GAME_FOLDER OUTPUT_CSV [--debug-window] [--debug-dir DIRECTORY]
-```
-
-The two debug options can be used together.
-
 ## Build
 
 Install OpenCV. On Fedora:
