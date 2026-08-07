@@ -21,6 +21,15 @@ struct CardBoundingBox {
     float confidence;   ///< YOLO detection confidence.
 };
 
+/** @brief Return the weighted SIFT descriptor and keypoint-position cost. */
+float siftMatchingCost(
+    const cv::Mat& firstDescriptor,
+    const cv::Point2f& firstPosition,
+    const cv::Mat& secondDescriptor,
+    const cv::Point2f& secondPosition,
+    float positionWeight
+);
+
 /** @brief Classified card detection associated with one video frame. */
 struct FrameCardDetection {
     int frameNumber;                          ///< Zero-based video frame number.

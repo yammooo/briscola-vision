@@ -12,6 +12,18 @@ namespace briscola {
 
 constexpr int modelSize = 1024;
 
+float siftMatchingCost(
+    const cv::Mat& firstDescriptor,
+    const cv::Point2f& firstPosition,
+    const cv::Mat& secondDescriptor,
+    const cv::Point2f& secondPosition,
+    float positionWeight
+) {
+    const cv::Point2f positionDifference = firstPosition - secondPosition;
+    return static_cast<float>(cv::norm(firstDescriptor, secondDescriptor)) +
+           positionWeight * positionDifference.dot(positionDifference);
+}
+
 YoloCardDetector::YoloCardDetector(
     const std::filesystem::path& model,
     float confidence,

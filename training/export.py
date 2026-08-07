@@ -27,7 +27,8 @@ def main() -> None:
         simplify=True,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(exported, args.output)
+    if Path(exported).resolve() != args.output.resolve():
+        shutil.copy2(exported, args.output)
 
 
 if __name__ == "__main__":
