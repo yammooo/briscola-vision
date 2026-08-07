@@ -7,7 +7,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenCV REQUIRED COMPONENTS core dnn features2d highgui imgcodecs imgproc videoio)
 
 add_library(briscola
-    src/app.cpp
     src/debug.cpp
     src/evaluation.cpp
     src/game.cpp
