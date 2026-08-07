@@ -25,6 +25,9 @@ target_link_libraries(briscola PUBLIC ${OpenCV_LIBS})
 add_executable(yolo_sift apps/yolo_sift.cpp)
 target_link_libraries(yolo_sift PRIVATE briscola)
 
+add_executable(evaluate_yolo_sift apps/evaluate_yolo_sift.cpp)
+target_link_libraries(evaluate_yolo_sift PRIVATE briscola)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(briscola_tests tests/most_frequent_briscola_provider_test.cpp)
