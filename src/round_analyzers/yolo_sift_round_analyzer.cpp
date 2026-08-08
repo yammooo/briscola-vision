@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -20,7 +19,6 @@ namespace briscola {
 constexpr int modelSize = 1024;
 constexpr int cardWidth = 581;
 constexpr int cardHeight = 315;
-constexpr float positionWeight = 0.01F;
 constexpr float maximumPositionDistance = 120.0F;
 constexpr float loweRatio = 0.75F;
 constexpr int minimumMatches = 8;
@@ -29,15 +27,6 @@ double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
     return std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - start
     ).count();
-}
-
-float siftMatchingCost(
-    const cv::Mat& firstDescriptor,
-    const cv::Mat& secondDescriptor,
-    float positionSquared
-) {
-    return static_cast<float>(cv::norm(firstDescriptor, secondDescriptor)) +
-           positionWeight * positionSquared;
 }
 
 cv::Mat rectifyCard(const cv::Mat& frame, const cv::RotatedRect& box) {
@@ -190,32 +179,40 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
             [&](const cv::Range& range) {
                 for (int cardIndex = range.start; cardIndex < range.end; ++cardIndex) {
                     const ReferenceCard& reference = references_[cardIndex];
-                    std::vector<float> acceptedCosts;
-                    for (int queryIndex = 0; queryIndex < queryDescriptors.rows; ++queryIndex) {
-                        float bestCost = std::numeric_limits<float>::max();
-                        float secondCost = std::numeric_limits<float>::max();
-                        for (int referenceIndex = 0; referenceIndex < reference.descriptors.rows; ++referenceIndex) {
+                    cv::Mat mask(
+                        queryDescriptors.rows,
+                        reference.descriptors.rows,
+                        CV_8U,
+                        cv::Scalar(0)
+                    );
+                    for (int queryIndex = 0; queryIndex < mask.rows; ++queryIndex) {
+                        for (int referenceIndex = 0; referenceIndex < mask.cols; ++referenceIndex) {
                             const cv::Point2f difference =
                                 queryKeypoints[queryIndex].pt -
                                 reference.keypoints[referenceIndex].pt;
-                            const float positionSquared = difference.dot(difference);
-                            if (positionSquared >
+                            if (difference.dot(difference) <=
                                 maximumPositionDistance * maximumPositionDistance) {
-                                continue;
-                            }
-                            const float cost = siftMatchingCost(
-                                queryDescriptors.row(queryIndex),
-                                reference.descriptors.row(referenceIndex),
-                                positionSquared
-                            );
-                            if (cost < bestCost) {
-                                secondCost = bestCost;
-                                bestCost = cost;
-                            } else if (cost < secondCost) {
-                                secondCost = cost;
+                                mask.at<unsigned char>(queryIndex, referenceIndex) = 255;
                             }
                         }
-                        if (bestCost < loweRatio * secondCost) acceptedCosts.push_back(bestCost);
+                    }
+
+                    cv::BFMatcher matcher(cv::NORM_L2);
+                    std::vector<std::vector<cv::DMatch>> matches;
+                    matcher.knnMatch(
+                        queryDescriptors,
+                        reference.descriptors,
+                        matches,
+                        2,
+                        mask
+                    );
+
+                    std::vector<float> acceptedCosts;
+                    for (const auto& nearest : matches) {
+                        if (nearest.size() == 2 &&
+                            nearest[0].distance < loweRatio * nearest[1].distance) {
+                            acceptedCosts.push_back(nearest[0].distance);
+                        }
                     }
 
                     if (!acceptedCosts.empty()) {
