@@ -3,6 +3,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -25,7 +26,7 @@ DebugSink::DebugSink(
     }
 }
 
-void DebugSink::publish(
+void DebugSink::publishImage(
     std::string_view stage,
     std::string_view source,
     int frameNumber,
@@ -54,6 +55,16 @@ void DebugSink::publish(
         cv::imshow(windowName, image);
         cv::waitKey(1);
     }
+}
+
+void DebugSink::publishText(
+    std::string_view stage,
+    std::string_view source,
+    int frameNumber,
+    std::string_view message
+) {
+    std::clog << source << " " << stage << " frame " << frameNumber
+              << ": " << message << '\n';
 }
 
 }  // namespace briscola

@@ -13,17 +13,20 @@ int main(int argc, char* argv[]) {
     if (argc < 5) {
         std::cerr << "Usage: " << argv[0]
                   << " MODEL CARD_REFERENCES GAME_FOLDER OUTPUT_CSV [--debug-window]"
-                     " [--debug-dir DIRECTORY]\n";
+                     " [--debug-dir DIRECTORY] [--debug-text]\n";
         return 1;
     }
 
     try {
         bool showWindow = false;
+        bool showText = false;
         std::filesystem::path debugDirectory;
         for (int index = 5; index < argc; ++index) {
             const std::string option = argv[index];
             if (option == "--debug-window") {
                 showWindow = true;
+            } else if (option == "--debug-text") {
+                showText = true;
             } else if (option == "--debug-dir" && ++index < argc) {
                 debugDirectory = argv[index];
             } else {
@@ -42,7 +45,7 @@ int main(int argc, char* argv[]) {
         briscola::GameRunner runner(analyzer, briscolaProvider);
         const auto result = runner.run(
             argv[3],
-            showWindow || !debugDirectory.empty() ? &debug : nullptr
+            showWindow || showText || !debugDirectory.empty() ? &debug : nullptr
         );
         briscola::writeGameCsv(result, argv[4]);
         briscola::writeGameSummary(result, std::cout);

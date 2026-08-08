@@ -8,6 +8,7 @@
 #include <opencv2/videoio.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -23,6 +24,12 @@ constexpr float positionWeight = 0.01F;
 constexpr float maximumPositionDistance = 120.0F;
 constexpr float loweRatio = 0.75F;
 constexpr int minimumMatches = 8;
+
+double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start
+    ).count();
+}
 
 float siftMatchingCost(
     const cv::Mat& firstDescriptor,
@@ -71,7 +78,8 @@ YoloCardDetector::YoloCardDetector(
 }
 
 std::vector<CardBoundingBox> YoloCardDetector::detect(
-    const cv::Mat& frame
+    const cv::Mat& frame,
+    double* inferenceMilliseconds
 ) {
     if (frame.empty()) {
         throw std::invalid_argument("cannot detect cards in an empty frame");
@@ -97,7 +105,11 @@ std::vector<CardBoundingBox> YoloCardDetector::detect(
         true
     );
     network_.setInput(blob);
+    const auto inferenceStart = std::chrono::steady_clock::now();
     const cv::Mat output = network_.forward();
+    if (inferenceMilliseconds) {
+        *inferenceMilliseconds = elapsedMilliseconds(inferenceStart);
+    }
     if (output.dims != 3 || output.size[1] != 6) {
         throw std::runtime_error("unexpected YOLO OBB output shape");
     }
@@ -151,9 +163,11 @@ SiftCardClassifier::SiftCardClassifier(
 }
 
 std::optional<CardPrediction> SiftCardClassifier::classify(
-    const cv::Mat& cardImage
+    const cv::Mat& cardImage,
+    SiftTiming* timing
 ) {
     if (cardImage.empty()) return std::nullopt;
+    if (timing) *timing = {};
 
     CardPrediction bestPrediction{};
     int bestMatchCount = 0;
@@ -165,9 +179,12 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
 
         std::vector<cv::KeyPoint> queryKeypoints;
         cv::Mat queryDescriptors;
+        const auto featuresStart = std::chrono::steady_clock::now();
         sift_->detectAndCompute(image, cv::noArray(), queryKeypoints, queryDescriptors);
+        if (timing) timing->features += elapsedMilliseconds(featuresStart);
         if (queryDescriptors.empty()) continue;
 
+        const auto matchingStart = std::chrono::steady_clock::now();
         std::vector<std::pair<int, float>> scores(references_.size());
         cv::parallel_for_(cv::Range(0, static_cast<int>(references_.size())),
             [&](const cv::Range& range) {
@@ -225,6 +242,7 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
                 bestMedianCost = medianCost;
             }
         }
+        if (timing) timing->matching += elapsedMilliseconds(matchingStart);
     }
 
     if (bestMatchCount < minimumMatches) return std::nullopt;
@@ -262,16 +280,47 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
             continue;
         }
 
-        const auto frameDetections = detector_.detect(frame);
+        double inferenceMilliseconds = 0.0;
+        const auto frameDetections = detector_.detect(
+            frame,
+            debug ? &inferenceMilliseconds : nullptr
+        );
+
+        if (debug) {
+            debug->publishText(
+                "timing",
+                video.stem().string(),
+                frameNumber,
+                "ONNX inference: " +
+                    std::to_string(static_cast<int>(std::round(inferenceMilliseconds))) +
+                    " ms"
+            );
+        }
 
         cv::Mat annotated;
         if (debug) annotated = frame.clone();
 
+        int cardIndex = 0;
         for (const CardBoundingBox& detection : frameDetections) {
-            const auto prediction = classifier_.classify(rectifyCard(frame, detection.box));
+            SiftTiming timing{};
+            const auto prediction = classifier_.classify(
+                rectifyCard(frame, detection.box),
+                debug ? &timing : nullptr
+            );
             detections.push_back({frameNumber, detection, prediction});
 
             if (debug) {
+                debug->publishText(
+                    "timing",
+                    video.stem().string(),
+                    frameNumber,
+                    "card " + std::to_string(cardIndex) +
+                        ": SIFT features " +
+                        std::to_string(static_cast<int>(std::round(timing.features))) +
+                        " ms, matching " +
+                        std::to_string(static_cast<int>(std::round(timing.matching))) +
+                        " ms"
+                );
                 cv::Point2f corners[4];
                 detection.box.points(corners);
                 for (int corner = 0; corner < 4; ++corner) {
@@ -302,10 +351,11 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
                     2
                 );
             }
+            ++cardIndex;
         }
 
         if (debug) {
-            debug->publish("yolo", video.stem().string(), frameNumber, annotated);
+            debug->publishImage("yolo", video.stem().string(), frameNumber, annotated);
         }
         ++frameNumber;
     }

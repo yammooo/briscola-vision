@@ -23,6 +23,12 @@ struct CardBoundingBox {
     float confidence;   ///< YOLO detection confidence.
 };
 
+/** @brief SIFT classification timings in milliseconds. */
+struct SiftTiming {
+    double features; ///< Keypoint and descriptor extraction time.
+    double matching; ///< Reference matching time.
+};
+
 /** @brief Classified card detection associated with one video frame. */
 struct FrameCardDetection {
     int frameNumber;                          ///< Zero-based video frame number.
@@ -48,9 +54,13 @@ public:
     /**
      * @brief Detect cards in a frame.
      * @param frame Source video frame.
+     * @param inferenceMilliseconds Optional ONNX inference duration.
      * @return Detected card bounding boxes contained within the frame.
      */
-    std::vector<CardBoundingBox> detect(const cv::Mat& frame);
+    std::vector<CardBoundingBox> detect(
+        const cv::Mat& frame,
+        double* inferenceMilliseconds = nullptr
+    );
 
 private:
     cv::dnn::Net network_; ///< Loaded YOLO network.
@@ -70,9 +80,13 @@ public:
     /**
      * @brief Classify one cropped card image.
      * @param cardImage Image containing one detected card.
+     * @param timing Optional SIFT timings.
      * @return Card prediction, or empty when no reliable match exists.
      */
-    std::optional<CardPrediction> classify(const cv::Mat& cardImage);
+    std::optional<CardPrediction> classify(
+        const cv::Mat& cardImage,
+        SiftTiming* timing = nullptr
+    );
 
 private:
     /** @brief SIFT data precomputed for one reference card. */
