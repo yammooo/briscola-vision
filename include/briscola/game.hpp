@@ -6,7 +6,9 @@
 #include "briscola/model.hpp"
 #include "briscola/pipeline.hpp"
 
+#include <cstddef>
 #include <filesystem>
+#include <functional>
 
 namespace briscola {
 
@@ -24,12 +26,14 @@ public:
      * @brief Analyze and score one complete game folder.
      * @param gameFolder Folder containing rounds 1 through 20.
      * @param debug Optional destination for diagnostic images.
+     * @param progress Optional callback receiving completed and total rounds.
      * @return Complete or partially resolved game result.
      * @throws std::runtime_error If inputs are missing, invalid, or unreadable.
      */
     GameResult run(
         const std::filesystem::path& gameFolder,
-        DebugSink* debug = nullptr
+        DebugSink* debug = nullptr,
+        const std::function<void(std::size_t, std::size_t)>& progress = {}
     );
 
 private:

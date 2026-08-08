@@ -14,14 +14,16 @@ GameRunner::GameRunner(
 
 GameResult GameRunner::run(
     const std::filesystem::path& gameFolder,
-    DebugSink* debug
+    DebugSink* debug,
+    const std::function<void(std::size_t, std::size_t)>& progress
 ) {
     const auto videos = findRoundVideos(gameFolder);
     std::vector<RoundObservation> observations;
     observations.reserve(videos.size());
 
-    for (const auto& video : videos) {
-        observations.push_back(roundAnalyzer_.analyze(video, debug));
+    for (std::size_t index = 0; index < videos.size(); ++index) {
+        observations.push_back(roundAnalyzer_.analyze(videos[index], debug));
+        if (progress) progress(index + 1, videos.size());
     }
 
     GameResult game;

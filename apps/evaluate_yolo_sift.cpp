@@ -22,7 +22,15 @@ int main(int argc, char* argv[]) {
         briscola::GameRunner runner(analyzer, briscolaProvider);
 
         const auto start = std::chrono::steady_clock::now();
-        const briscola::GameResult prediction = runner.run(argv[3]);
+        std::cout << "Progress: 0%" << std::flush;
+        const briscola::GameResult prediction = runner.run(
+            argv[3],
+            nullptr,
+            [](std::size_t completed, std::size_t total) {
+                std::cout << "\rProgress: " << 100 * completed / total << '%' << std::flush;
+            }
+        );
+        std::cout << '\n';
         const auto elapsed = std::chrono::steady_clock::now() - start;
 
         briscola::writeGameCsv(prediction, argv[5]);
