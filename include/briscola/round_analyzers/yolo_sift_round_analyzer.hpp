@@ -47,7 +47,7 @@ public:
      */
     explicit YoloCardDetector(
         const std::filesystem::path& model,
-        float confidence = 0.40F,
+        float confidence,
         float nmsThreshold = 0.7F
     );
 

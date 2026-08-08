@@ -31,9 +31,7 @@ SIFT is retained as the baseline. The `--orb` option instead uses one-level ORB 
 
 ### Temporal aggregation and briscola
 
-This pipeline aggregates frame predictions only from unambiguous layouts. A frame with exactly one horizontal box votes for the briscola candidate. A frame with exactly two vertical boxes votes for the player cards: the upper box is North and the lower box is South. The most frequent prediction wins each vote.
-
-The same two-vertical-card frames establish the median North and South vertical positions for that round. The leader is then inferred without using card identity: while scanning all frames in order, the first player slot with a stable nearby vertical detection is the leader. Ties or insufficient evidence leave the leader empty.
+This pipeline aggregates frame predictions over time. A frame with exactly one horizontal box votes for the briscola candidate. Classified vertical boxes are grouped by predicted card; the two most recurring stable classes are the player cards. Their median box heights assign North (higher) and South (lower), while the class that first appears stably is the leader. Ties or insufficient evidence leave fields empty.
 
 These are explicit assumptions of this pipeline and dataset: the briscola is present in every round and horizontal, player cards are vertical, and North/South occupy stable upper/lower regions. They are not game rules and are not imposed on other analyzers.
 

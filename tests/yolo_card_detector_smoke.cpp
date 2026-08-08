@@ -8,7 +8,7 @@
 int main(int argc, char* argv[]) {
     assert(argc == 3);
 
-    briscola::YoloCardDetector detector(argv[1]);
+    briscola::YoloCardDetector detector(argv[1], 0.40F);
     const cv::Mat card = cv::imread(argv[2]);
     assert(!card.empty());
 

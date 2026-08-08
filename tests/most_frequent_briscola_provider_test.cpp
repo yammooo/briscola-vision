@@ -32,15 +32,13 @@ int main() {
     const Card south{3, Suit::Clubs};
     const std::vector<FrameCardDetection> detections{
         card(0, {500.0F, 200.0F}, {200.0F, 80.0F}, briscola),
-        card(0, {250.0F, 100.0F}, {80.0F, 200.0F}, north),
+        card(0, {250.0F, 300.0F}, {80.0F, 200.0F}, south),
         card(5, {500.0F, 200.0F}, {200.0F, 80.0F}, briscola),
-        card(5, {250.0F, 100.0F}, {80.0F, 200.0F}, north),
+        card(5, {250.0F, 300.0F}, {80.0F, 200.0F}, south),
         card(10, {500.0F, 200.0F}, {200.0F, 80.0F}, briscola),
-        card(10, {250.0F, 100.0F}, {80.0F, 200.0F}, north),
-        card(10, {250.0F, 300.0F}, {80.0F, 200.0F}, south),
+        card(10, {250.0F, 280.0F}, {80.0F, 200.0F}, north),
         card(15, {500.0F, 200.0F}, {200.0F, 80.0F}, briscola),
-        card(15, {250.0F, 100.0F}, {80.0F, 200.0F}, north),
-        card(15, {250.0F, 300.0F}, {80.0F, 200.0F}, south)
+        card(15, {250.0F, 280.0F}, {80.0F, 200.0F}, north)
     };
 
     RoundTemporalAggregator aggregator;
@@ -51,5 +49,5 @@ int main() {
     assert(observation.southCard->card.rank == south.rank);
     assert(observation.briscolaCandidate);
     assert(observation.briscolaCandidate->card.rank == briscola.rank);
-    assert(observation.leader == Player::North);
+    assert(observation.leader == Player::South);
 }

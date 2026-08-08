@@ -27,6 +27,9 @@ target_link_libraries(yolo_sift PRIVATE briscola)
 add_executable(evaluate_yolo_sift apps/evaluate_yolo_sift.cpp)
 target_link_libraries(evaluate_yolo_sift PRIVATE briscola)
 
+add_executable(analyze_round apps/analyze_round.cpp)
+target_link_libraries(analyze_round PRIVATE briscola)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(briscola_tests tests/most_frequent_briscola_provider_test.cpp)

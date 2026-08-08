@@ -17,6 +17,7 @@
 namespace briscola {
 
 constexpr int modelSize = 1024;
+constexpr float modelConfidence = 0.60F;
 constexpr int cardWidth = 581;
 constexpr int cardHeight = 315;
 constexpr float maximumPositionDistance = 100.0F;
@@ -111,6 +112,35 @@ std::optional<int> firstStableFrame(std::vector<int> frames) {
         }
     }
     return std::nullopt;
+}
+
+struct CardCluster {
+    Card card;
+    std::vector<const FrameCardDetection*> detections;
+};
+
+std::optional<int> clusterFirstStableFrame(const CardCluster& cluster) {
+    std::vector<int> frames;
+    for (const FrameCardDetection* detection : cluster.detections) {
+        frames.push_back(detection->frameNumber);
+    }
+    return firstStableFrame(frames);
+}
+
+CardPrediction clusterPrediction(const CardCluster& cluster) {
+    float confidence = 0.0F;
+    for (const FrameCardDetection* detection : cluster.detections) {
+        confidence += detection->prediction->confidence;
+    }
+    return {cluster.card, confidence / cluster.detections.size()};
+}
+
+float clusterY(const CardCluster& cluster) {
+    std::vector<float> positions;
+    for (const FrameCardDetection* detection : cluster.detections) {
+        positions.push_back(detection->detection.box.center.y);
+    }
+    return median(positions);
 }
 
 std::string predictionText(const std::optional<CardPrediction>& prediction) {
@@ -216,7 +246,7 @@ SiftCardClassifier::SiftCardClassifier(
     bool useOrb
 ) : matcherNorm_(useOrb ? cv::NORM_HAMMING : cv::NORM_L2) {
     if (useOrb) {
-        features_ = cv::ORB::create(1000, 1.2F, 1);
+        features_ = cv::ORB::create(1500, 1.2F, 1);
     } else {
         features_ = cv::SIFT::create(500);
     }
@@ -334,12 +364,8 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
 RoundObservation RoundTemporalAggregator::aggregate(
     const std::vector<FrameCardDetection>& detections
 ) const {
-    std::vector<CardPrediction> northVotes;
-    std::vector<CardPrediction> southVotes;
     std::vector<CardPrediction> briscolaVotes;
-    std::vector<float> northPositions;
-    std::vector<float> southPositions;
-    std::vector<std::pair<int, float>> verticalPositions;
+    std::vector<CardCluster> clusters;
 
     for (std::size_t first = 0; first < detections.size();) {
         std::size_t last = first + 1;
@@ -348,62 +374,80 @@ RoundObservation RoundTemporalAggregator::aggregate(
             ++last;
         }
 
-        std::vector<const FrameCardDetection*> horizontal;
-        std::vector<const FrameCardDetection*> vertical;
+        const FrameCardDetection* horizontal = nullptr;
+        int horizontalCount = 0;
         for (std::size_t index = first; index < last; ++index) {
             if (isHorizontal(detections[index].detection)) {
-                horizontal.push_back(&detections[index]);
-            } else {
-                vertical.push_back(&detections[index]);
-                verticalPositions.push_back({
-                    detections[index].frameNumber,
-                    detections[index].detection.box.center.y
-                });
+                horizontal = &detections[index];
+                ++horizontalCount;
+            } else if (detections[index].prediction) {
+                const auto cluster = std::find_if(
+                    clusters.begin(),
+                    clusters.end(),
+                    [&](const CardCluster& candidate) {
+                        return sameCard(candidate.card, detections[index].prediction->card);
+                    }
+                );
+                if (cluster == clusters.end()) {
+                    clusters.push_back({
+                        detections[index].prediction->card,
+                        {&detections[index]}
+                    });
+                } else {
+                    cluster->detections.push_back(&detections[index]);
+                }
             }
         }
 
-        if (horizontal.size() == 1 && horizontal[0]->prediction) {
-            briscolaVotes.push_back(*horizontal[0]->prediction);
-        }
-
-        if (vertical.size() == 2) {
-            if (vertical[0]->detection.box.center.y > vertical[1]->detection.box.center.y) {
-                std::swap(vertical[0], vertical[1]);
-            }
-            northPositions.push_back(vertical[0]->detection.box.center.y);
-            southPositions.push_back(vertical[1]->detection.box.center.y);
-            if (vertical[0]->prediction) northVotes.push_back(*vertical[0]->prediction);
-            if (vertical[1]->prediction) southVotes.push_back(*vertical[1]->prediction);
+        if (horizontalCount == 1 && horizontal->prediction) {
+            briscolaVotes.push_back(*horizontal->prediction);
         }
         first = last;
     }
 
-    std::optional<Player> leader;
-    if (!northPositions.empty() && !southPositions.empty()) {
-        const float northY = median(northPositions);
-        const float southY = median(southPositions);
-        const float maximumSlotDistance = std::abs(southY - northY) / 3.0F;
-        std::vector<int> northFrames;
-        std::vector<int> southFrames;
-        for (const auto& position : verticalPositions) {
-            if (std::abs(position.second - northY) <= maximumSlotDistance) {
-                northFrames.push_back(position.first);
-            }
-            if (std::abs(position.second - southY) <= maximumSlotDistance) {
-                southFrames.push_back(position.first);
-            }
+    std::stable_sort(
+        clusters.begin(),
+        clusters.end(),
+        [](const CardCluster& first, const CardCluster& second) {
+            return first.detections.size() > second.detections.size();
         }
+    );
+    clusters.erase(
+        std::remove_if(
+            clusters.begin(),
+            clusters.end(),
+            [](const CardCluster& cluster) {
+                return !clusterFirstStableFrame(cluster);
+            }
+        ),
+        clusters.end()
+    );
 
-        const auto northFirst = firstStableFrame(northFrames);
-        const auto southFirst = firstStableFrame(southFrames);
-        if (northFirst && southFirst && *northFirst != *southFirst) {
-            leader = *northFirst < *southFirst ? Player::North : Player::South;
+    std::optional<CardPrediction> northCard;
+    std::optional<CardPrediction> southCard;
+    std::optional<Player> leader;
+    if (clusters.size() >= 2) {
+        const CardCluster& first = clusters[0];
+        const CardCluster& second = clusters[1];
+        const auto firstFrame = clusterFirstStableFrame(first);
+        const auto secondFrame = clusterFirstStableFrame(second);
+        const float firstY = clusterY(first);
+        const float secondY = clusterY(second);
+
+        if (firstFrame && secondFrame && firstY != secondY) {
+            const bool firstIsNorth = firstY < secondY;
+            northCard = clusterPrediction(firstIsNorth ? first : second);
+            southCard = clusterPrediction(firstIsNorth ? second : first);
+            if (*firstFrame != *secondFrame) {
+                const bool firstLeads = *firstFrame < *secondFrame;
+                leader = firstLeads == firstIsNorth ? Player::North : Player::South;
+            }
         }
     }
 
     return {
-        mostFrequentPrediction(northVotes),
-        mostFrequentPrediction(southVotes),
+        northCard,
+        southCard,
         leader,
         mostFrequentPrediction(briscolaVotes)
     };
@@ -413,7 +457,7 @@ YoloSiftRoundAnalyzer::YoloSiftRoundAnalyzer(
     const std::filesystem::path& model,
     const std::vector<CardReference>& references,
     bool useOrb
-) : detector_(model), classifier_(references, useOrb) {}
+) : detector_(model, modelConfidence), classifier_(references, useOrb) {}
 
 RoundObservation YoloSiftRoundAnalyzer::analyze(
     const std::filesystem::path& video,
