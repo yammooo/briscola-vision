@@ -19,7 +19,7 @@ namespace briscola {
 constexpr int modelSize = 1024;
 constexpr int cardWidth = 581;
 constexpr int cardHeight = 315;
-constexpr float maximumPositionDistance = 120.0F;
+constexpr float maximumPositionDistance = 100.0F;
 constexpr float loweRatio = 0.75F;
 constexpr int minimumMatches = 8;
 constexpr int maximumStableFrameGap = 10;
@@ -216,7 +216,7 @@ SiftCardClassifier::SiftCardClassifier(
     bool useOrb
 ) : matcherNorm_(useOrb ? cv::NORM_HAMMING : cv::NORM_L2) {
     if (useOrb) {
-        features_ = cv::ORB::create(500, 1.2F, 1);
+        features_ = cv::ORB::create(1000, 1.2F, 1);
     } else {
         features_ = cv::SIFT::create(500);
     }
