@@ -5,12 +5,19 @@
 int main(int argc, char* argv[]) {
     if (argc != 3) return 1;
 
-    briscola::SiftCardClassifier classifier(briscola::readCardReferences(argv[1]));
-    const auto prediction = classifier.classify(cv::imread(argv[2]));
-    if (!prediction) return 1;
+    const auto references = briscola::readCardReferences(argv[1]);
+    const cv::Mat image = cv::imread(argv[2]);
+    briscola::SiftCardClassifier classifier(references);
+    const auto prediction = classifier.classify(image);
+    if (!prediction || prediction->card.rank != 1 ||
+        prediction->card.suit != briscola::Suit::Clubs) {
+        return 1;
+    }
 
-    return prediction->card.rank == 1 &&
-                   prediction->card.suit == briscola::Suit::Clubs
+    briscola::SiftCardClassifier orb(references, true);
+    const auto orbPrediction = orb.classify(image);
+    return orbPrediction && orbPrediction->card.rank == 1 &&
+                   orbPrediction->card.suit == briscola::Suit::Clubs
                ? 0
                : 1;
 }

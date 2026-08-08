@@ -23,7 +23,7 @@ struct CardBoundingBox {
     float confidence;   ///< YOLO detection confidence.
 };
 
-/** @brief SIFT classification timings in milliseconds. */
+/** @brief Local-feature classification timings in milliseconds. */
 struct SiftTiming {
     double features; ///< Keypoint and descriptor extraction time.
     double matching; ///< Reference matching time.
@@ -68,14 +68,18 @@ private:
     float nmsThreshold_;   ///< Maximum overlap retained by NMS.
 };
 
-/** @brief Classifies a cropped card using SIFT reference features. */
+/** @brief Classifies a cropped card using SIFT or ORB reference features. */
 class SiftCardClassifier {
 public:
     /**
      * @brief Precompute SIFT features for the reference images.
      * @param references Labelled reference card images.
+     * @param useOrb Use one-level ORB instead of SIFT.
      */
-    explicit SiftCardClassifier(const std::vector<CardReference>& references);
+    explicit SiftCardClassifier(
+        const std::vector<CardReference>& references,
+        bool useOrb = false
+    );
 
     /**
      * @brief Classify one cropped card image.
@@ -96,7 +100,8 @@ private:
         cv::Mat descriptors;                 ///< Reference SIFT descriptors.
     };
 
-    cv::Ptr<cv::SIFT> sift_;                 ///< Shared SIFT feature extractor.
+    cv::Ptr<cv::Feature2D> features_;        ///< Shared feature extractor.
+    int matcherNorm_;                         ///< Descriptor distance norm.
     std::vector<ReferenceCard> references_;  ///< All available reference cards.
 };
 
@@ -120,10 +125,12 @@ public:
      * @brief Construct the analyzer and load its detector model.
      * @param model Path to `briscola_cards.onnx`.
      * @param references Labelled card reference images.
+     * @param useOrb Use one-level ORB instead of SIFT.
      */
     YoloSiftRoundAnalyzer(
         const std::filesystem::path& model,
-        const std::vector<CardReference>& references
+        const std::vector<CardReference>& references,
+        bool useOrb = false
     );
 
     /** @copydoc IRoundAnalyzer::analyze */

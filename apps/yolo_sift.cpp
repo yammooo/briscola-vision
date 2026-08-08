@@ -13,13 +13,14 @@ int main(int argc, char* argv[]) {
     if (argc < 5) {
         std::cerr << "Usage: " << argv[0]
                   << " MODEL CARD_REFERENCES GAME_FOLDER OUTPUT_CSV [--debug-window]"
-                     " [--debug-dir DIRECTORY] [--debug-text]\n";
+                     " [--debug-dir DIRECTORY] [--debug-text] [--orb]\n";
         return 1;
     }
 
     try {
         bool showWindow = false;
         bool showText = false;
+        bool useOrb = false;
         std::filesystem::path debugDirectory;
         for (int index = 5; index < argc; ++index) {
             const std::string option = argv[index];
@@ -27,15 +28,17 @@ int main(int argc, char* argv[]) {
                 showWindow = true;
             } else if (option == "--debug-text") {
                 showText = true;
+            } else if (option == "--orb") {
+                useOrb = true;
             } else if (option == "--debug-dir" && ++index < argc) {
                 debugDirectory = argv[index];
             } else {
-                throw std::runtime_error("invalid debug option");
+                throw std::runtime_error("invalid option");
             }
         }
 
         const auto references = briscola::readCardReferences(argv[2]);
-        briscola::YoloSiftRoundAnalyzer analyzer(argv[1], references);
+        briscola::YoloSiftRoundAnalyzer analyzer(argv[1], references, useOrb);
         briscola::MostFrequentBriscolaProvider briscolaProvider;
         briscola::DebugSink debug(
             debugDirectory,

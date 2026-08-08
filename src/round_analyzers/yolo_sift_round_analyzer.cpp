@@ -212,11 +212,22 @@ std::vector<CardBoundingBox> YoloCardDetector::detect(
 }
 
 SiftCardClassifier::SiftCardClassifier(
-    const std::vector<CardReference>& references
-) : sift_(cv::SIFT::create(500)) {
+    const std::vector<CardReference>& references,
+    bool useOrb
+) : matcherNorm_(useOrb ? cv::NORM_HAMMING : cv::NORM_L2) {
+    if (useOrb) {
+        features_ = cv::ORB::create(500, 1.2F, 1);
+    } else {
+        features_ = cv::SIFT::create(500);
+    }
     for (const CardReference& card : references) {
         ReferenceCard reference{card.card, {}, {}};
-        sift_->detectAndCompute(card.image, cv::noArray(), reference.keypoints, reference.descriptors);
+        features_->detectAndCompute(
+            card.image,
+            cv::noArray(),
+            reference.keypoints,
+            reference.descriptors
+        );
         if (!reference.descriptors.empty()) references_.push_back(std::move(reference));
     }
 
@@ -243,7 +254,7 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
         std::vector<cv::KeyPoint> queryKeypoints;
         cv::Mat queryDescriptors;
         const auto featuresStart = std::chrono::steady_clock::now();
-        sift_->detectAndCompute(image, cv::noArray(), queryKeypoints, queryDescriptors);
+        features_->detectAndCompute(image, cv::noArray(), queryKeypoints, queryDescriptors);
         if (timing) timing->features += elapsedMilliseconds(featuresStart);
         if (queryDescriptors.empty()) continue;
 
@@ -271,7 +282,7 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
                         }
                     }
 
-                    cv::BFMatcher matcher(cv::NORM_L2);
+                    cv::BFMatcher matcher(matcherNorm_);
                     std::vector<std::vector<cv::DMatch>> matches;
                     matcher.knnMatch(
                         queryDescriptors,
@@ -400,8 +411,9 @@ RoundObservation RoundTemporalAggregator::aggregate(
 
 YoloSiftRoundAnalyzer::YoloSiftRoundAnalyzer(
     const std::filesystem::path& model,
-    const std::vector<CardReference>& references
-) : detector_(model), classifier_(references) {}
+    const std::vector<CardReference>& references,
+    bool useOrb
+) : detector_(model), classifier_(references, useOrb) {}
 
 RoundObservation YoloSiftRoundAnalyzer::analyze(
     const std::filesystem::path& video,
@@ -457,7 +469,7 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
                     video.stem().string(),
                     frameNumber,
                     "card " + std::to_string(cardIndex) +
-                        ": SIFT features " +
+                        ": features " +
                         std::to_string(static_cast<int>(std::round(timing.features))) +
                         " ms, matching " +
                         std::to_string(static_cast<int>(std::round(timing.matching))) +

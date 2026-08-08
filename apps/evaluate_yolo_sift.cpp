@@ -7,17 +7,18 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <string>
 
 int main(int argc, char* argv[]) {
-    if (argc != 6) {
+    if (argc != 6 && (argc != 7 || std::string(argv[6]) != "--orb")) {
         std::cerr << "Usage: " << argv[0]
-                  << " MODEL CARD_REFERENCES GAME_FOLDER GROUND_TRUTH_CSV OUTPUT_CSV\n";
+                  << " MODEL CARD_REFERENCES GAME_FOLDER GROUND_TRUTH_CSV OUTPUT_CSV [--orb]\n";
         return 1;
     }
 
     try {
         const auto references = briscola::readCardReferences(argv[2]);
-        briscola::YoloSiftRoundAnalyzer analyzer(argv[1], references);
+        briscola::YoloSiftRoundAnalyzer analyzer(argv[1], references, argc == 7);
         briscola::MostFrequentBriscolaProvider briscolaProvider;
         briscola::GameRunner runner(analyzer, briscolaProvider);
 
