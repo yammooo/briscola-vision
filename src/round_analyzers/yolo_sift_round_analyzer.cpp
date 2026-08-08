@@ -22,6 +22,7 @@ constexpr int cardHeight = 315;
 constexpr float maximumPositionDistance = 120.0F;
 constexpr float loweRatio = 0.75F;
 constexpr int minimumMatches = 8;
+constexpr int maximumStableFrameGap = 10;
 
 double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
     return std::chrono::duration<double, std::milli>(
@@ -51,6 +52,79 @@ cv::Mat rectifyCard(const cv::Mat& frame, const cv::RotatedRect& box) {
         {cardWidth, cardHeight}
     );
     return card;
+}
+
+bool isHorizontal(const CardBoundingBox& detection) {
+    cv::Point2f points[4];
+    detection.box.points(points);
+    const cv::Point2f firstEdge = points[1] - points[0];
+    const cv::Point2f secondEdge = points[2] - points[1];
+    const cv::Point2f longEdge = firstEdge.dot(firstEdge) > secondEdge.dot(secondEdge)
+        ? firstEdge
+        : secondEdge;
+    return std::abs(longEdge.x) >= std::abs(longEdge.y);
+}
+
+bool sameCard(const Card& first, const Card& second) {
+    return first.rank == second.rank && first.suit == second.suit;
+}
+
+std::optional<CardPrediction> mostFrequentPrediction(
+    const std::vector<CardPrediction>& predictions
+) {
+    if (predictions.empty()) return std::nullopt;
+
+    CardPrediction result{};
+    int bestCount = 0;
+    float bestConfidence = 0.0F;
+    for (const CardPrediction& candidate : predictions) {
+        int count = 0;
+        float confidence = 0.0F;
+        for (const CardPrediction& prediction : predictions) {
+            if (sameCard(candidate.card, prediction.card)) {
+                ++count;
+                confidence += prediction.confidence;
+            }
+        }
+        const float averageConfidence = confidence / count;
+        if (count > bestCount ||
+            (count == bestCount && averageConfidence > bestConfidence)) {
+            result = {candidate.card, averageConfidence};
+            bestCount = count;
+            bestConfidence = averageConfidence;
+        }
+    }
+    return result;
+}
+
+float median(std::vector<float> values) {
+    std::sort(values.begin(), values.end());
+    return values[values.size() / 2];
+}
+
+std::optional<int> firstStableFrame(std::vector<int> frames) {
+    std::sort(frames.begin(), frames.end());
+    for (std::size_t index = 1; index < frames.size(); ++index) {
+        if (frames[index] > frames[index - 1] &&
+            frames[index] - frames[index - 1] <= maximumStableFrameGap) {
+            return frames[index - 1];
+        }
+    }
+    return std::nullopt;
+}
+
+std::string predictionText(const std::optional<CardPrediction>& prediction) {
+    if (!prediction) return "unknown";
+    const char* suit = prediction->card.suit == Suit::Cups   ? "cups"
+                       : prediction->card.suit == Suit::Coins ? "coins"
+                       : prediction->card.suit == Suit::Clubs ? "clubs"
+                                                              : "spades";
+    return std::to_string(prediction->card.rank) + "-" + suit;
+}
+
+std::string leaderText(const std::optional<Player>& leader) {
+    if (!leader) return "unknown";
+    return *leader == Player::North ? "north" : "south";
 }
 
 YoloCardDetector::YoloCardDetector(
@@ -249,8 +323,79 @@ std::optional<CardPrediction> SiftCardClassifier::classify(
 RoundObservation RoundTemporalAggregator::aggregate(
     const std::vector<FrameCardDetection>& detections
 ) const {
-    static_cast<void>(detections);
-    return {};
+    std::vector<CardPrediction> northVotes;
+    std::vector<CardPrediction> southVotes;
+    std::vector<CardPrediction> briscolaVotes;
+    std::vector<float> northPositions;
+    std::vector<float> southPositions;
+    std::vector<std::pair<int, float>> verticalPositions;
+
+    for (std::size_t first = 0; first < detections.size();) {
+        std::size_t last = first + 1;
+        while (last < detections.size() &&
+               detections[last].frameNumber == detections[first].frameNumber) {
+            ++last;
+        }
+
+        std::vector<const FrameCardDetection*> horizontal;
+        std::vector<const FrameCardDetection*> vertical;
+        for (std::size_t index = first; index < last; ++index) {
+            if (isHorizontal(detections[index].detection)) {
+                horizontal.push_back(&detections[index]);
+            } else {
+                vertical.push_back(&detections[index]);
+                verticalPositions.push_back({
+                    detections[index].frameNumber,
+                    detections[index].detection.box.center.y
+                });
+            }
+        }
+
+        if (horizontal.size() == 1 && horizontal[0]->prediction) {
+            briscolaVotes.push_back(*horizontal[0]->prediction);
+        }
+
+        if (vertical.size() == 2) {
+            if (vertical[0]->detection.box.center.y > vertical[1]->detection.box.center.y) {
+                std::swap(vertical[0], vertical[1]);
+            }
+            northPositions.push_back(vertical[0]->detection.box.center.y);
+            southPositions.push_back(vertical[1]->detection.box.center.y);
+            if (vertical[0]->prediction) northVotes.push_back(*vertical[0]->prediction);
+            if (vertical[1]->prediction) southVotes.push_back(*vertical[1]->prediction);
+        }
+        first = last;
+    }
+
+    std::optional<Player> leader;
+    if (!northPositions.empty() && !southPositions.empty()) {
+        const float northY = median(northPositions);
+        const float southY = median(southPositions);
+        const float maximumSlotDistance = std::abs(southY - northY) / 3.0F;
+        std::vector<int> northFrames;
+        std::vector<int> southFrames;
+        for (const auto& position : verticalPositions) {
+            if (std::abs(position.second - northY) <= maximumSlotDistance) {
+                northFrames.push_back(position.first);
+            }
+            if (std::abs(position.second - southY) <= maximumSlotDistance) {
+                southFrames.push_back(position.first);
+            }
+        }
+
+        const auto northFirst = firstStableFrame(northFrames);
+        const auto southFirst = firstStableFrame(southFrames);
+        if (northFirst && southFirst && *northFirst != *southFirst) {
+            leader = *northFirst < *southFirst ? Player::North : Player::South;
+        }
+    }
+
+    return {
+        mostFrequentPrediction(northVotes),
+        mostFrequentPrediction(southVotes),
+        leader,
+        mostFrequentPrediction(briscolaVotes)
+    };
 }
 
 YoloSiftRoundAnalyzer::YoloSiftRoundAnalyzer(
@@ -330,17 +475,9 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
                     );
                 }
 
-                std::string label = "unknown";
-                if (prediction) {
-                    const char* suit = prediction->card.suit == Suit::Cups   ? "cups"
-                                       : prediction->card.suit == Suit::Coins ? "coins"
-                                       : prediction->card.suit == Suit::Clubs ? "clubs"
-                                                                              : "spades";
-                    label = std::to_string(prediction->card.rank) + "-" + suit;
-                }
                 cv::putText(
                     annotated,
-                    label,
+                    predictionText(prediction),
                     detection.box.boundingRect().tl(),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.7,
@@ -357,7 +494,19 @@ RoundObservation YoloSiftRoundAnalyzer::analyze(
         ++frameNumber;
     }
 
-    return aggregator_.aggregate(detections);
+    const RoundObservation observation = aggregator_.aggregate(detections);
+    if (debug) {
+        debug->publishText(
+            "round",
+            video.stem().string(),
+            frameNumber,
+            "north=" + predictionText(observation.northCard) +
+                ", south=" + predictionText(observation.southCard) +
+                ", leader=" + leaderText(observation.leader) +
+                ", briscola=" + predictionText(observation.briscolaCandidate)
+        );
+    }
+    return observation;
 }
 
 }  // namespace briscola

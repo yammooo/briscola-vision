@@ -100,13 +100,13 @@ private:
     std::vector<ReferenceCard> references_;  ///< All available reference cards.
 };
 
-/** @brief Converts frame detections into one round observation. */
+/** @brief Aggregates the fixed horizontal-briscola, vertical-player layout. */
 class RoundTemporalAggregator {
 public:
     /**
      * @brief Aggregate detections across an entire round video.
      * @param detections Classified detections in chronological frame order.
-     * @return Possibly incomplete round observation.
+     * @return Observation inferred from unambiguous frame layouts.
      */
     RoundObservation aggregate(
         const std::vector<FrameCardDetection>& detections
