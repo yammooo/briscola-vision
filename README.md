@@ -25,9 +25,9 @@ Each synthetic image combines a DTD texture background with 1--6 front-card scan
 
 Each fifth video frame is processed. YOLO returns oriented card boxes; each box is rectified so its long side becomes the 581-pixel long side of the 581 x 315 reference scans. The crop and its 180-degree rotation are both tested, which covers upside-down cards.
 
-The 40 reference scans are converted to keypoints and descriptors once at startup. Each rectified crop is then compared against every reference with OpenCV `BFMatcher`, Lowe's ratio test, and a 120-pixel spatial mask. The mask permits only plausible feature locations after rectification, while the card with the most accepted matches is selected. This is still brute-force matching, but only over the fixed set of 40 references and uses OpenCV's optimized implementation.
+The 40 reference scans are converted to keypoints and descriptors once at startup. Each rectified crop is then compared against every reference with OpenCV `BFMatcher`, Lowe's ratio test, and a 60-pixel spatial mask. The mask permits only plausible feature locations after rectification, while the card with the most accepted matches is selected. This is still brute-force matching, but only over the fixed set of 40 references and uses OpenCV's optimized implementation.
 
-SIFT is retained as the baseline. The `--orb` option instead uses one-level ORB with Hamming matching. After rectification, the card already has an expected scale and global orientation, so SIFT's multi-scale invariance is not needed. It can be harmful for the coins suit: the same coin drawing occurs at different sizes and positions on several cards, so a scale-invariant local feature can match the wrong rank convincingly. One-level ORB removes the scale pyramid and is therefore a useful, faster alternative to benchmark. Neither local matcher alone understands the full card layout; the spatial mask and temporal evidence provide the remaining structure.
+SIFT is retained as the baseline. The `--orb` option instead uses one-level ORB with Hamming matching. After rectification, the card already has an expected scale and global orientation, so SIFT's multi-scale invariance is not needed. It can be harmful for the coins suit: the same coin drawing occurs at different sizes and positions on several cards, so a scale-invariant local feature can match the wrong rank convincingly. One-level ORB removes the scale pyramid and is therefore a useful alternative to benchmark. Neither local matcher alone understands the full card layout; the spatial mask and temporal evidence provide the remaining structure.
 
 ### Temporal aggregation and briscola
 
@@ -36,6 +36,12 @@ This pipeline aggregates frame predictions over time. A frame with exactly one h
 These are explicit assumptions of this pipeline and dataset: the briscola is present in every round and horizontal, player cards are vertical, and North/South occupy stable upper/lower regions. They are not game rules and are not imposed on other analyzers.
 
 Every round supplies an optional briscola candidate. The current `MostFrequentBriscolaProvider` resolves the game briscola by the candidate reported by the most rounds, using the earliest candidate to break ties. This consensus reduces the effect of individual frame or round errors.
+
+### Final benchmark and limitation
+
+The final configuration uses `--orb`, a one-level ORB extractor with 5,000 keypoints, a 60-pixel mask, and 0.60 YOLO confidence. Across the four provided games it obtained 158/160 player cards (98.75%), 160/160 leader/winner fields, 3/4 exact briscola cards, and 12/12 game-result fields. The only briscola error kept the correct suit, so it did not affect game scoring.
+
+This configuration is deliberately offline: it took about 28 to 34 minutes per game. The main cost is local-feature matching, not YOLO: every detected crop and its 180-degree rotation are matched against all 40 references. The high keypoint count improves recognition but greatly increases descriptor extraction, mask construction, and brute-force comparisons; it is therefore unsuitable for real-time use, which is outside this project's objective.
 
 ## Build
 
