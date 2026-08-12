@@ -42,18 +42,38 @@ RoundOutcome evaluateRound(
     Player leader,
     Suit briscolaSuit
 ) {
-    Player winner = leader;
+    // Determine which card belongs to the leader and the other player
+    const Card& leaderCard = (leader == Player::North) ? northCard : southCard;
+    const Card& otherCard = (leader == Player::North) ? southCard : northCard;
 
-    if (northCard.suit == southCard.suit) {
+    Player winner;
+
+    // If leader played a briscola
+    if (leaderCard.suit == briscolaSuit) {
+        // Other didn't play briscola -> leader wins
+        if (otherCard.suit != briscolaSuit) {
+            winner = leader;
+        } else {
+            // Both played briscola -> higher strength wins
+            if (cardStrength(northCard.rank) > cardStrength(southCard.rank)) {
+                winner = Player::North;
+            } else {
+                winner = Player::South;
+            }
+        }
+    } else if (otherCard.suit == briscolaSuit) {
+        // Leader didn't play briscola but other did -> other wins
+        winner = (leader == Player::North) ? Player::South : Player::North;
+    } else if (leaderCard.suit != otherCard.suit) {
+        // No briscolas and other didn't follow leader's suit -> leader wins
+        winner = leader;
+    } else {
+        // Same suit (non-briscola) -> higher strength wins
         if (cardStrength(northCard.rank) > cardStrength(southCard.rank)) {
             winner = Player::North;
         } else {
             winner = Player::South;
         }
-    } else if (northCard.suit == briscolaSuit) {
-        winner = Player::North;
-    } else if (southCard.suit == briscolaSuit) {
-        winner = Player::South;
     }
 
     RoundOutcome outcome{winner, cardPoints(northCard.rank) + cardPoints(southCard.rank)};
