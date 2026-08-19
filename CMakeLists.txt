@@ -4,13 +4,14 @@ project(briscola_vision LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED COMPONENTS core dnn features2d highgui imgcodecs imgproc videoio)
+find_package(OpenCV REQUIRED COMPONENTS core dnn features2d calib3d highgui imgcodecs imgproc videoio)
 
 add_library(briscola
     src/debug.cpp
     src/evaluation.cpp
     src/game.cpp
     src/io.cpp
+    src/briscola_providers/first_frame_briscola_provider.cpp
     src/briscola_providers/most_frequent_briscola_provider.cpp
     src/rules.cpp
     src/round_analyzers/yolo_sift_round_analyzer.cpp
@@ -29,6 +30,9 @@ target_link_libraries(evaluate_yolo_sift PRIVATE briscola)
 
 add_executable(analyze_round apps/analyze_round.cpp)
 target_link_libraries(analyze_round PRIVATE briscola)
+
+add_executable(briscola_finder apps/briscola_finder.cpp)
+target_link_libraries(briscola_finder PRIVATE briscola)
 
 include(CTest)
 if(BUILD_TESTING)
