@@ -45,10 +45,10 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
 
     State state = BaselineA;
     int stableCounter = 0;
-    const int stableNeeded = 6;
+    const int stableNeeded = 3; //twas 6
     const int blurSize = 21;
     const int threshVal = 25;
-    const int motionPixelThreshold = 800; // empirical
+    const int motionPixelThreshold = 2500; // empirical 800
 
     std::optional<Player> leader;
     int frameNumber = 0;
@@ -83,6 +83,10 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         const bool bottomDetected = bottomMotion > motionPixelThreshold;
         const bool anyMotion = totalMotion > motionPixelThreshold;
 
+        if (debug) {
+            std::cout << "Frame " << frameNumber << " - Total Movement: " << totalMotion << std::endl;
+        }
+
         // suppress periodic motion debug output; we'll publish selected images at the end
 
         switch (state) {
@@ -92,6 +96,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
                     first_frame = frame.clone();
                     state = WaitingForMovement1;
                     stableCounter = 0;
+                    if(debug) std::cout<<"first frame acquired";
                 }
                 break;
             case WaitingForMovement1:
@@ -107,6 +112,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
                     frame_before_second_movement = frame.clone();
                     state = WaitingForMovement2;
                     stableCounter = 0;
+                    if(debug) std::cout<<"frame before second movement acquired";
                 }
                 break;
             case WaitingForMovement2:
@@ -121,6 +127,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
                     center_resting_frame = frame.clone();
                     state = WaitingForMovement3;
                     stableCounter = 0;
+                    if(debug) std::cout<<"center resting frame acquired";
                 }
                 break;
             case WaitingForMovement3:
