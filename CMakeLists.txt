@@ -4,7 +4,11 @@ project(briscola_vision LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED COMPONENTS core dnn features2d calib3d highgui imgcodecs imgproc videoio)
+find_package(OpenCV QUIET COMPONENTS core dnn features2d calib3d highgui imgcodecs imgproc videoio objdetect)
+if(NOT OpenCV_FOUND)
+    # Fallback for OpenCV 5 packaging: accept any provided OpenCV configuration
+    find_package(OpenCV REQUIRED)
+endif()
 
 add_library(briscola
     src/debug.cpp
@@ -15,6 +19,7 @@ add_library(briscola
     src/briscola_providers/most_frequent_briscola_provider.cpp
     src/rules.cpp
     src/round_analyzers/yolo_sift_round_analyzer.cpp
+    src/round_analyzers/movement_pattern_round_analyzer.cpp
 )
 target_include_directories(briscola PUBLIC
     include
@@ -33,6 +38,9 @@ target_link_libraries(analyze_round PRIVATE briscola)
 
 add_executable(briscola_finder apps/briscola_finder.cpp)
 target_link_libraries(briscola_finder PRIVATE briscola)
+
+add_executable(movement_pattern apps/movement_pattern.cpp)
+target_link_libraries(movement_pattern PRIVATE briscola)
 
 include(CTest)
 if(BUILD_TESTING)
