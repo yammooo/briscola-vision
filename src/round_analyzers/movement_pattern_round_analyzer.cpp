@@ -10,6 +10,7 @@
 #include <opencv2/geometry.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -174,19 +175,30 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::morphologyEx(fmask, fmask, cv::MORPH_CLOSE, closeKernel);
     cv::morphologyEx(smask, smask, cv::MORPH_CLOSE, closeKernel);
 
-    // Blob detection & cropping helper
+    // Blob detection & cropping helper (weighted by proximity to center)
     auto extractBestCrop = [&](const cv::Mat& bin, const cv::Mat& src)->cv::Mat {
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         if (contours.empty()) return {};
 
-        // Filter tiny contours and pick the largest remaining
         const double minArea = 1000.0;
-        size_t bestIdx = SIZE_MAX; double bestArea = 0.0;
+        const cv::Point2f frameCenter(src.cols * 0.5f, src.rows * 0.5f);
+        size_t bestIdx = SIZE_MAX;
+        double bestScore = 0.0;
+
         for (size_t i = 0; i < contours.size(); ++i) {
             double a = cv::contourArea(contours[i]);
             if (a < minArea) continue;
-            if (a > bestArea) { bestArea = a; bestIdx = i; }
+
+            cv::Rect r = cv::boundingRect(contours[i]);
+            float dx = (r.x + r.width * 0.5f - frameCenter.x) / frameCenter.x;
+            float dy = (r.y + r.height * 0.5f - frameCenter.y) / frameCenter.y;
+            double score = a * std::exp(-2.0 * (dx * dx + dy * dy));
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestIdx = i;
+            }
         }
         if (bestIdx == SIZE_MAX) return {};
 
