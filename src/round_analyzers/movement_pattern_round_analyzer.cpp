@@ -18,7 +18,6 @@ namespace briscola {
 
 namespace {
     enum State {
-        BaselineA,
         WaitingForMovement1,
         BaselineB,
         WaitingForMovement2,
@@ -44,7 +43,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::Mat prevGray;
     cv::Mat first_frame, frame_before_second_movement, center_resting_frame;
 
-    State state = BaselineA;
+    State state = WaitingForMovement1;
     int stableCounter = 0;
     const int stableNeeded = 3; //twas 6
     const int blurSize = 21;
@@ -55,8 +54,17 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     int frameNumber = 0;
     int lastDebugPublish = 0;
 
+    cv::Mat min_motion_frame_after_40;
+    int min_motion_after_40_val = std::numeric_limits<int>::max();
+    int frame_before_second_movement_num = -1;
+
     while (cap.read(frame)) {
         if (frame.empty()) break;
+        if (first_frame.empty()) {
+            first_frame = frame.clone();
+            if (debug) std::cout << "first frame acquired (frame 1)\n";
+        }
+
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         cv::GaussianBlur(gray, gray, cv::Size(blurSize, blurSize), 0);
@@ -84,6 +92,13 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         const bool bottomDetected = bottomMotion > motionPixelThreshold;
         const bool anyMotion = totalMotion > motionPixelThreshold;
 
+        if (frame_before_second_movement_num >= 0 && frameNumber >= frame_before_second_movement_num + 40) {
+            if (totalMotion < min_motion_after_40_val) {
+                min_motion_after_40_val = totalMotion;
+                min_motion_frame_after_40 = frame.clone();
+            }
+        }
+
         if (debug) {
             std::cout << "Frame " << frameNumber << " - Total Movement: " << totalMotion << std::endl;
         }
@@ -91,15 +106,6 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         // suppress periodic motion debug output; we'll publish selected images at the end
 
         switch (state) {
-            case BaselineA:
-                if (!anyMotion) ++stableCounter; else stableCounter = 0;
-                if (stableCounter >= stableNeeded) {
-                    first_frame = frame.clone();
-                    state = WaitingForMovement1;
-                    stableCounter = 0;
-                    if(debug) std::cout<<"first frame acquired";
-                }
-                break;
             case WaitingForMovement1:
                 if (topDetected || bottomDetected) {
                     leader = topDetected ? Player::North : Player::South;
@@ -111,6 +117,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
                 if (!anyMotion) ++stableCounter; else stableCounter = 0;
                 if (stableCounter >= stableNeeded) {
                     frame_before_second_movement = frame.clone();
+                    frame_before_second_movement_num = frameNumber;
                     state = WaitingForMovement2;
                     stableCounter = 0;
                     if(debug) std::cout<<"frame before second movement acquired";
@@ -144,6 +151,21 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         ++frameNumber;
         if (state == Done) break;
     }
+
+    // =========================================================================
+    // SPECIAL CASES PATCH
+    // =========================================================================
+    // Special Case: If center_resting_frame is empty, use the frame with
+    // minimum movement found at least40 frames after the frame before second movement.
+    if (center_resting_frame.empty() && !min_motion_frame_after_40.empty()) {
+        center_resting_frame = min_motion_frame_after_40.clone();
+        if (debug) {
+            std::cout << "[Special Case] Used frame with minimum movement ("
+                      << min_motion_after_40_val
+                      << ") at least 40 frames after Baseline B as center_resting_frame\n";
+        }
+    }
+    // =========================================================================
 
     if (first_frame.empty() || frame_before_second_movement.empty() || center_resting_frame.empty()) {
         throw std::runtime_error("failed to capture required baseline/movement frames");
