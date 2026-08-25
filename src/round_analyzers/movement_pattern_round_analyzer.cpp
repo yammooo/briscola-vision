@@ -71,6 +71,25 @@ PatternResult findPattern(const std::vector<double>& signal) {
                 (signal[i] > signal[i - 1] && signal[i] >= signal[i + 1]))
                && signal[i] >= minH;
     };
+    auto isProminentPeak = [&](int i, double minH) -> bool {
+        const double minProminence = 8000.0; // Valore di prominenza hardcoded
+        
+        if (!isPeak(i, minH)) return false;
+
+        bool leftDrop = false;
+        for (int j = i - 1; j >= 0; --j) {
+            if (signal[i] - signal[j] >= minProminence) { leftDrop = true; break; }
+            if (signal[j] > signal[i]) break; // Trovato un picco più alto a sinistra
+        }
+
+        bool rightDrop = false;
+        for (int j = i + 1; j < n; ++j) {
+            if (signal[i] - signal[j] >= minProminence) { rightDrop = true; break; }
+            if (signal[j] > signal[i]) break; // Trovato un picco più alto a destra
+        }
+
+        return leftDrop && rightDrop;
+    };
     auto isValley = [&](int i) -> bool {
         if (i < 2 || i >= n - 2) return false;
         return (deriv[i - 1] < 0.0 && deriv[i] >= 0.0) ||
@@ -84,14 +103,14 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // --- Step 1: find P1a (first peak >= 12000) ---
     int p1a = -1;
     for (int i = 2; i < n - 10; ++i) {
-        if (isPeak(i, 12000.0)) { p1a = i; break; }
+        if (isProminentPeak(i, 12000.0)) { p1a = i; break; }
     }
     if (p1a == -1) return res;
     res.p1a = p1a;
 
     // --- Step 2: find valley after P1a (derivative goes + → −, then − → +) ---
     int l1a = -1;
-    for (int i = p1a + 1; i < std::min(n - 4, p1a + 40); ++i) {
+    for (int i = p1a + 1; i < std::min(n - 4, p1a + 25); ++i) {
         if (isValley(i)) { l1a = i; break; }
     }
     res.p1b = -1; // will be set if a sub-peak exists
@@ -99,8 +118,8 @@ PatternResult findPattern(const std::vector<double>& signal) {
 
     // --- Step 3: find P1b after valley (peak after the dip, any height >= 8000) ---
     if (l1a != -1) {
-        for (int i = l1a + 1; i < std::min(n - 4, l1a + 40); ++i) {
-            if (isPeak(i, 8000.0)) {
+        for (int i = l1a + 1; i < std::min(n - 4, l1a + 25); ++i) {
+            if (isProminentPeak(i, 8000.0)) {
                 res.p1b = i;
                 wave1_last_peak = i;
                 break;
@@ -112,7 +131,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // Stop early if motion rises sharply again (new card entry begins)
     {
         int searchFrom = wave1_last_peak;
-        int searchTo   = std::min(n - 1, searchFrom + 80);
+        int searchTo   = std::min(n - 1, searchFrom + 25);
         int bestIdx    = searchFrom;
         double bestVal = signal[searchFrom];
 
@@ -135,14 +154,14 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // --- Step 1: find P2a (first peak >= 12000 after part1) ---
     int p2a = -1;
     for (int i = res.part1_idx + 1; i < n - 5; ++i) {
-        if (isPeak(i, 12000.0)) { p2a = i; break; }
+        if (isProminentPeak(i, 12000.0)) { p2a = i; break; }
     }
     if (p2a == -1) return res;
     res.p2a = p2a;
 
     // --- Step 2: find valley after P2a ---
     int l2a = -1;
-    for (int i = p2a + 1; i < std::min(n - 4, p2a + 40); ++i) {
+    for (int i = p2a + 1; i < std::min(n - 4, p2a + 25); ++i) {
         if (isValley(i)) { l2a = i; break; }
     }
     res.p2b = -1;
@@ -150,8 +169,8 @@ PatternResult findPattern(const std::vector<double>& signal) {
 
     // --- Step 3: find P2b after valley ---
     if (l2a != -1) {
-        for (int i = l2a + 1; i < std::min(n - 4, l2a + 40); ++i) {
-            if (isPeak(i, 8000.0)) {
+        for (int i = l2a + 1; i < std::min(n - 4, l2a + 25); ++i) {
+            if (isProminentPeak(i, 8000.0)) {
                 res.p2b = i;
                 wave2_last_peak = i;
                 break;
@@ -162,7 +181,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // --- Step 4: find part2 = frame closest to 0, searching FORWARD from P2b (or P2a) ---
     {
         int searchFrom = wave2_last_peak;
-        int searchTo   = std::min(n - 1, searchFrom + 80);
+        int searchTo   = std::min(n - 1, searchFrom + 25);
         int bestIdx    = searchFrom;
         double bestVal = signal[searchFrom];
 
