@@ -118,7 +118,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
 
     // --- Step 3: find P1b after valley (peak after the dip, any height >= 8000) ---
     if (l1a != -1) {
-        for (int i = l1a + 1; i < std::min(n - 4, l1a + 25); ++i) {
+        for (int i = l1a + 1; i < std::min(n - 4, l1a + 35); ++i) {  //25?
             if (isProminentPeak(i, 8000.0)) {
                 res.p1b = i;
                 wave1_last_peak = i;
@@ -169,7 +169,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
 
     // --- Step 3: find P2b after valley ---
     if (l2a != -1) {
-        for (int i = l2a + 1; i < std::min(n - 4, l2a + 25); ++i) {
+        for (int i = l2a + 1; i < std::min(n - 4, l2a + 45); ++i) {  //25?
             if (isProminentPeak(i, 8000.0)) {
                 res.p2b = i;
                 wave2_last_peak = i;
