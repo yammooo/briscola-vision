@@ -33,6 +33,67 @@ struct PatternResult {
     bool success = false;
 };
 
+cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink* debug, const std::string& debug_name) {
+    if (target_crop.empty()) return {};
+
+    cv::Mat gray, edges;
+    cv::cvtColor(target_crop, gray, cv::COLOR_BGR2GRAY);
+    
+    cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
+    cv::Canny(gray, edges, 50, 150);
+    cv::dilate(edges, edges, cv::Mat(), cv::Point(-1, -1), 1);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(edges, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);
+
+    cv::Rect bestRect;
+    double bestAreaDiff = 1e9;
+    const double targetArea = 30000.0; //30k
+
+    cv::Mat debug_img;
+    if (debug) {
+        debug_img = target_crop.clone();
+    }
+
+    for (const auto& contour : contours) {
+        double area = cv::contourArea(contour);
+
+        // Scarta a monte macchie minuscole (< 20k) o contorni che coprono quasi l'intero frame (> 120k)
+        if (area < 20000 || area > 60000) continue;  //20k, 50k
+
+        std::vector<cv::Point> approx;
+        double peri = cv::arcLength(contour, true);
+        cv::approxPolyDP(contour, approx, 0.02 * peri, true);
+
+        if (approx.size() == 4 && cv::isContourConvex(approx)){
+            //approx.size() == 4 && cv::isContourConvex(approx)
+            // Calcola la discrepanza rispetto all'area ideale
+            double areaDiff = std::abs(area - targetArea);
+
+            if (areaDiff < bestAreaDiff) {
+                bestAreaDiff = areaDiff;
+                bestRect = cv::boundingRect(approx);
+            }
+
+            if (debug) {
+                cv::polylines(debug_img, approx, true, cv::Scalar(0, 255, 0), 2);
+            }
+        }
+    }
+
+    if (bestAreaDiff == 1e9) return {}; // Nessun quadrilatero valido trovato
+
+    cv::Mat final_card = target_crop(bestRect).clone();
+
+    if (debug) {
+        debug->publishImage("capture", debug_name + "_quads", 0, debug_img, true, false);
+        debug->publishImage("capture", debug_name, 0, final_card, true, false);
+    }
+
+    return final_card;
+}
+
+
 cv::Mat extractBestCrop(const cv::Mat& bin, const cv::Mat& src) {
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -467,9 +528,14 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         throw std::runtime_error("failed to isolate card images");
     }
 
+    std::string s1 = video.stem().string() + "RESIZED";
+    std::string s2 = video.stem().string() + "RESIZED";
+    cv::Mat resized_first_card = extractAndNormalizeCard(first_card, debug, s1 );
+    cv::Mat resized_second_card = extractAndNormalizeCard(second_card, debug, s2 );
+    
     std::optional<CardPrediction> firstPred = classifier_.classify(first_card);
     std::optional<CardPrediction> secondPred = classifier_.classify(second_card);
-
+    
     RoundObservation obs;
     obs.leader = leader;
     if (leader) {
@@ -503,14 +569,14 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         std::string s5 = video.stem().string() + "_center_resting_frame";
         debug->publishImage("capture", s5, 0, frame_part2, true, false);
         // 6) smoothed signal plot
-        std::string s6 = video.stem().string() + "_smoothed_signal_plot";
-        cv::Mat plotImg = renderSignalPlot(
+        //std::string s6 = video.stem().string() + "_smoothed_signal_plot";
+        /*cv::Mat plotImg = renderSignalPlot(
             smoothed,
             totalMotions,
             pat,
             video.stem().string() + " - Pattern Signal & Extrema"
-        );
-        debug->publishImage("capture", s6, 0, plotImg, true, false);
+        );*/
+        //debug->publishImage("capture", s6, 0, plotImg, true, false);
     }
 
     return obs;
