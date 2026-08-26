@@ -33,6 +33,60 @@ struct PatternResult {
     bool success = false;
 };
 
+cv::Mat extractBestCrop(const cv::Mat& bin, const cv::Mat& src) {
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    if (contours.empty()) return {};
+
+    const double minArea = 1000.0;
+    const cv::Point2f frameCenter(src.cols * 0.5f, src.rows * 0.5f);
+    size_t bestIdx = SIZE_MAX;
+    double bestScore = 0.0;
+
+    for (size_t i = 0; i < contours.size(); ++i) {
+        double a = cv::contourArea(contours[i]);
+        if (a < minArea) continue;
+
+        cv::Rect r = cv::boundingRect(contours[i]);
+        float dx = (r.x + r.width * 0.5f - frameCenter.x) / frameCenter.x;
+        float dy = (r.y + r.height * 0.5f - frameCenter.y) / frameCenter.y;
+        double score = a * std::exp(-2.0 * (dx * dx + dy * dy));
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestIdx = i;
+        }
+    }
+    if (bestIdx == SIZE_MAX) return {};
+
+    // 1. Prendi il rettangolo originale solo per trovare il centro del movimento
+    cv::Rect r = cv::boundingRect(contours[bestIdx]);
+    int cx = r.x + r.width / 2;
+    int cy = r.y + r.height / 2;
+
+    // 2. Definisci la dimensione fissa desiderata
+    const int fixedSize = 400;
+
+    // 3. Calcola il punto in alto a sinistra per centrare il box
+    int nx = cx - (fixedSize / 2);
+    int ny = cy - (fixedSize / 2);
+
+    // 4. Se il rettangolo sbatte contro i bordi del video, spostalo per mantenerlo 400x400
+    nx = std::max(0, std::min(nx, src.cols - fixedSize));
+    ny = std::max(0, std::min(ny, src.rows - fixedSize));
+
+    cv::Rect fixedRect(nx, ny, fixedSize, fixedSize);
+
+    // 5. Controllo di sicurezza finale 
+    if (fixedRect.width <= 0 || fixedRect.height <= 0 || 
+        fixedRect.x + fixedRect.width > src.cols || 
+        fixedRect.y + fixedRect.height > src.rows) {
+        return {};
+    }
+
+    return src(fixedRect).clone();
+}
+
 std::vector<double> smoothSignal(const std::vector<int>& raw) {
     int n = static_cast<int>(raw.size());
     std::vector<double> smoothed(n, 0.0);
@@ -405,41 +459,6 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::morphologyEx(smask, smask, cv::MORPH_CLOSE, closeKernel);
 
     // Blob detection & cropping helper (weighted by proximity to center)
-    auto extractBestCrop = [&](const cv::Mat& bin, const cv::Mat& src)->cv::Mat {
-        std::vector<std::vector<cv::Point>> contours;
-        cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-        if (contours.empty()) return {};
-
-        const double minArea = 1000.0;
-        const cv::Point2f frameCenter(src.cols * 0.5f, src.rows * 0.5f);
-        size_t bestIdx = SIZE_MAX;
-        double bestScore = 0.0;
-
-        for (size_t i = 0; i < contours.size(); ++i) {
-            double a = cv::contourArea(contours[i]);
-            if (a < minArea) continue;
-
-            cv::Rect r = cv::boundingRect(contours[i]);
-            float dx = (r.x + r.width * 0.5f - frameCenter.x) / frameCenter.x;
-            float dy = (r.y + r.height * 0.5f - frameCenter.y) / frameCenter.y;
-            double score = a * std::exp(-2.0 * (dx * dx + dy * dy));
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestIdx = i;
-            }
-        }
-        if (bestIdx == SIZE_MAX) return {};
-
-        cv::Rect r = cv::boundingRect(contours[bestIdx]);
-        const int pad = 8;
-        r.x = std::max(0, r.x - pad);
-        r.y = std::max(0, r.y - pad);
-        r.width = std::min(src.cols - r.x, r.width + 2*pad);
-        r.height = std::min(src.rows - r.y, r.height + 2*pad);
-        if (r.width <= 0 || r.height <= 0) return {};
-        return src(r).clone();
-    };
 
     cv::Mat first_card = extractBestCrop(fmask, frame_part1);
     cv::Mat second_card = extractBestCrop(smask, frame_part2);
