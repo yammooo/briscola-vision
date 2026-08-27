@@ -43,6 +43,9 @@ std::vector<CardFeatureReference> preprocessReferences(
     const std::vector<CardReference>& raw_references,
     cv::Ptr<cv::ORB>& orb
 ) {
+
+    // pre-calculate features for all reference cards, so we don't have to do it every time we match. save the keypoints and descriptors for each reference card. return a vector of CardFeatureReference, which contains the card identity, keypoints, and descriptors.
+
     std::vector<CardFeatureReference> processed_refs;
     processed_refs.reserve(raw_references.size());
 
@@ -71,10 +74,12 @@ std::optional<CardPrediction> featurePatternMatch(
     const std::vector<CardFeatureReference>& processed_references,
     cv::Ptr<cv::ORB>& orb
 ) {
+
+    // very simple classifier: for each reference, match the features to the target crop. count the number of good matches (using Lowe's ratio test). return the card with the most good matches, if it has at least 10 good matches. otherwise return nullopt.
+
     if (target_crop.empty() || processed_references.empty()) return std::nullopt;
 
-    // Convert target to grayscale (no forced resize/rotation needed!)
-    cv::Mat gray_crop;
+    cv::Mat gray_crop;  //useless?
     if (target_crop.channels() == 1) {
         gray_crop = target_crop;
     } else {
@@ -85,14 +90,15 @@ std::optional<CardPrediction> featurePatternMatch(
     cv::Mat target_descriptors;
     orb->detectAndCompute(gray_crop, cv::noArray(), target_keypoints, target_descriptors);
 
-    // If no features are found in the crop (e.g., pure black image), exit safely
-    if (target_descriptors.empty()) return std::nullopt;
+    if (target_descriptors.empty()) return std::nullopt; //useless? 
 
     // NORM_HAMMING is required for ORB descriptors. crossCheck=true filters bad matches.
     cv::BFMatcher matcher(cv::NORM_HAMMING, true);
     
     int best_match_count = -1;
     std::optional<Card> best_card;
+
+    // For each reference, match its descriptors to the target crop's descriptors and count good matches
 
     for (const auto& pref : processed_references) {
         if (pref.descriptors.empty()) continue;
@@ -102,12 +108,12 @@ std::optional<CardPrediction> featurePatternMatch(
 
         int good_matches = 0;
         for (const auto& match : matches) {
-            // Threshold for descriptor distance (tune this between 30.0f and 50.0f if needed)
+            // Threshold for descriptor distance, empirically determined.
             if (match.distance < 40.0f) { 
                 good_matches++;
             }
         }
-
+        // return the card with most matches. 
         if (good_matches > best_match_count) {
             best_match_count = good_matches;
             best_card = pref.card;
@@ -121,6 +127,9 @@ std::optional<CardPrediction> featurePatternMatch(
 }
 
 cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink* debug, const std::string& debug_name) {
+
+    // from the 400x400 crop, find the smallest crop that contains the whole card. 
+
     if (target_crop.empty()) return {};
 
     cv::Mat gray, edges;
@@ -129,6 +138,8 @@ cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink*
     cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
     cv::Canny(gray, edges, 50, 150);
     cv::dilate(edges, edges, cv::Mat(), cv::Point(-1, -1), 1);
+
+    // look for the card by finding contours and selecting the one with area closest to 30k pixels. 
 
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(edges, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);
@@ -145,17 +156,21 @@ cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink*
     for (const auto& contour : contours) {
         double area = cv::contourArea(contour);
 
-        // Scarta a monte macchie minuscole (< 20k) o contorni che coprono quasi l'intero frame (> 120k)
+        // Contours limits were empirically chosen. 
         if (area < 20000 || area > 60000) continue;  //20k, 50k
+
+        // Approximate the contour to a polygon and check if it has 4 vertices (a quadrilateral)
 
         std::vector<cv::Point> approx;
         double peri = cv::arcLength(contour, true);
         cv::approxPolyDP(contour, approx, 0.02 * peri, true);
 
         if (approx.size() == 4 && cv::isContourConvex(approx)){
-            //approx.size() == 4 && cv::isContourConvex(approx)
-            // Calcola la discrepanza rispetto all'area ideale
+            //only consider quadrilaterals that are roughly rectangular.
+            
             double areaDiff = std::abs(area - targetArea);
+
+            // Keep track of the quadrilateral with area closest to the target area
 
             if (areaDiff < bestAreaDiff) {
                 bestAreaDiff = areaDiff;
@@ -169,11 +184,17 @@ cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink*
     }
 
     if (bestAreaDiff == 1e9) {
+
+        //fallback: if no quadrilateral was found, use template matching to find the card. This is a last resort and may not be very accurate.
+
         cv::Mat blur_gray;
         cv::GaussianBlur(gray, blur_gray, cv::Size(5, 5), 0);
 
         int template_w = 180;
         int template_h = 300;
+
+        // Create a dummy template of the expected card size (white rectangle) and use it for template matching. MatchTemplate will find the location in the target crop that best matches this template.
+
         cv::Mat dummy_card = cv::Mat::ones(cv::Size(template_w, template_h), CV_8UC1) * 255;
 
         cv::Mat result;
@@ -181,12 +202,15 @@ cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink*
 
         double minVal, maxVal;
         cv::Point minLoc, maxLoc;
+
+        //finds the location of the best match in the result of matchTemplate. We use maxLoc because we used TM_CCORR_NORMED, which gives higher values for better matches.
         cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
 
         bestRect = cv::Rect(maxLoc.x, maxLoc.y, template_w, template_h);
     }
 
     if (bestRect.area() == 0) {
+        // If no valid rectangle was found, fallback to a default rectangle in the center of the crop.
         bestRect = cv::Rect(50, 50, 300, 300);
     }
 
@@ -202,6 +226,11 @@ cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink*
 
 
 cv::Mat extractBestCrop(const cv::Mat& bin, const cv::Mat& src) {
+
+    //from the binary mask, find the largest contour and return a fixed-size crop (400x400) centered on the contour's bounding box.
+
+    // find the outer contours in the binary mask. 
+
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
     if (contours.empty()) return {};
@@ -212,6 +241,9 @@ cv::Mat extractBestCrop(const cv::Mat& bin, const cv::Mat& src) {
     double bestScore = 0.0;
 
     for (size_t i = 0; i < contours.size(); ++i) {
+
+        // foreach contour, compute its area and bounding rectangle. We want to find the contour that is closest to the center of the frame and has a reasonable area. We use a scoring function that combines area and distance from the center.
+
         double a = cv::contourArea(contours[i]);
         if (a < minArea) continue;
 
@@ -227,25 +259,21 @@ cv::Mat extractBestCrop(const cv::Mat& bin, const cv::Mat& src) {
     }
     if (bestIdx == SIZE_MAX) return {};
 
-    // 1. Prendi il rettangolo originale solo per trovare il centro del movimento
+    // center the crop around the bounding rectangle of the best contour. We return a fixed-sized crop centered on the contour's bounding box, ensuring it stays within the frame boundaries.
     cv::Rect r = cv::boundingRect(contours[bestIdx]);
     int cx = r.x + r.width / 2;
     int cy = r.y + r.height / 2;
 
-    // 2. Definisci la dimensione fissa desiderata
     const int fixedSize = 400;
 
-    // 3. Calcola il punto in alto a sinistra per centrare il box
     int nx = cx - (fixedSize / 2);
     int ny = cy - (fixedSize / 2);
 
-    // 4. Se il rettangolo sbatte contro i bordi del video, spostalo per mantenerlo 400x400
     nx = std::max(0, std::min(nx, src.cols - fixedSize));
     ny = std::max(0, std::min(ny, src.rows - fixedSize));
 
     cv::Rect fixedRect(nx, ny, fixedSize, fixedSize);
 
-    // 5. Controllo di sicurezza finale 
     if (fixedRect.width <= 0 || fixedRect.height <= 0 || 
         fixedRect.x + fixedRect.width > src.cols || 
         fixedRect.y + fixedRect.height > src.rows) {
@@ -256,6 +284,9 @@ cv::Mat extractBestCrop(const cv::Mat& bin, const cv::Mat& src) {
 }
 
 std::vector<double> smoothSignal(const std::vector<int>& raw) {
+
+    // refinement of the raw signal using a simple moving average filter. This helps reduce noise and makes it easier to detect peaks and valleys in the signal. We use a fixed kernel size of 5 for smoothing.
+
     int n = static_cast<int>(raw.size());
     std::vector<double> smoothed(n, 0.0);
     const std::vector<double> kernel = {0.061, 0.242, 0.383, 0.242, 0.061};
@@ -276,6 +307,9 @@ std::vector<double> smoothSignal(const std::vector<int>& raw) {
 }
 
 PatternResult findPattern(const std::vector<double>& signal) {
+
+    // analyze the smoothed signal to find the movement pattern. We look for two waves of peaks and valleys, corresponding to the two cards being placed. 
+
     PatternResult res;
     int n = static_cast<int>(signal.size());
     if (n < 15) return res;
@@ -286,7 +320,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
         deriv[i] = (signal[i + 1] - signal[i - 1]) * 0.5;
     }
 
-    // Helper predicates
+    // Helper predicates --> define what a prominent peak is, what a valley is. We use these to identify the key points in the signal that correspond to card movements.
     auto isPeak = [&](int i, double minH) -> bool {
         if (i < 2 || i >= n - 2) return false;
         return ((deriv[i - 1] > 0.0 && deriv[i] <= 0.0) ||
@@ -322,7 +356,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // WAVE 1: strictly sequential  P1a  ->  valley  ->  P1b  ->  near-0
     // =========================================================================
 
-    // --- Step 1: find P1a (first peak >= 12000) ---
+    // find P1a (first peak)
     int p1a = -1;
     for (int i = 2; i < n - 10; ++i) {
         if (isProminentPeak(i, 12000.0)) { p1a = i; break; }
@@ -330,15 +364,15 @@ PatternResult findPattern(const std::vector<double>& signal) {
     if (p1a == -1) return res;
     res.p1a = p1a;
 
-    // --- Step 2: find valley after P1a (derivative goes + → −, then − → +) ---
+    // find valley after P1a (first valley after the first peak)
     int l1a = -1;
     for (int i = p1a + 1; i < std::min(n - 4, p1a + 25); ++i) {
         if (isValley(i)) { l1a = i; break; }
     }
-    res.p1b = -1; // will be set if a sub-peak exists
+    res.p1b = -1; 
     int wave1_last_peak = p1a;
 
-    // --- Step 3: find P1b after valley (peak after the dip, any height >= 8000) ---
+    // find P1b after valley (second peak after the first valley)
     if (l1a != -1) {
         for (int i = l1a + 1; i < std::min(n - 4, l1a + 35); ++i) {  //25?
             if (isProminentPeak(i, 8000.0)) {
@@ -349,7 +383,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
         }
     }
 
-    // --- Step 4: find part1 = frame closest to 0, searching FORWARD from P1b (or P1a) ---
+    // find part1 = frame closest to 0, searching FORWARD from P1b (or P1a if no P1b)
     // Stop early if motion rises sharply again (new card entry begins)
     {
         int searchFrom = wave1_last_peak;
@@ -373,7 +407,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     //         P2a  ->  valley  ->  P2b  ->  near-0
     // =========================================================================
 
-    // --- Step 1: find P2a (first peak >= 12000 after part1) ---
+    // find P2a (first peak of wave 2, after part1)
     int p2a = -1;
     for (int i = res.part1_idx + 1; i < n - 5; ++i) {
         if (isProminentPeak(i, 12000.0)) { p2a = i; break; }
@@ -381,7 +415,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     if (p2a == -1) return res;
     res.p2a = p2a;
 
-    // --- Step 2: find valley after P2a ---
+    // find valley after P2a (first valley after the second peak)
     int l2a = -1;
     for (int i = p2a + 1; i < std::min(n - 4, p2a + 25); ++i) {
         if (isValley(i)) { l2a = i; break; }
@@ -389,7 +423,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     res.p2b = -1;
     int wave2_last_peak = p2a;
 
-    // --- Step 3: find P2b after valley ---
+    // find P2b after valley (second peak after the second valley)
     if (l2a != -1) {
         for (int i = l2a + 1; i < std::min(n - 4, l2a + 45); ++i) {  //25?
             if (isProminentPeak(i, 8000.0)) {
@@ -400,7 +434,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
         }
     }
 
-    // --- Step 4: find part2 = frame closest to 0, searching FORWARD from P2b (or P2a) ---
+    // find part2 = frame closest to 0, searching FORWARD from P2b (or P2a if no P2b)
     {
         int searchFrom = wave2_last_peak;
         int searchTo   = std::min(n - 1, searchFrom + 25);
@@ -421,7 +455,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     return res;
 }
 
-
+// Renders the plot of the signal with all peaks, valleys, and part indices marked. Only used for debugging. 
 cv::Mat renderSignalPlot(
     const std::vector<double>& smoothed,
     const std::vector<int>& raw,
@@ -569,11 +603,16 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::cvtColor(allFrames[0], prevGray, cv::COLOR_BGR2GRAY);
     cv::GaussianBlur(prevGray, prevGray, cv::Size(blurSize, blurSize), 0);
 
+    // Preprocess reference cards to extract features using ORB
+
     std::vector<CardReference> raw_references = references_;
     cv::Ptr<cv::ORB> orb = cv::ORB::create(1000);
     std::vector<CardFeatureReference> processed_references = preprocessReferences(raw_references, orb);
 
     for (int i = 1; i < n; ++i) {
+
+        // Analyze motion between frames using frame differencing and thresholding to detect movement. Calculate motion value for the entire frame, top half, and bottom half, based on how many pixels have changed from the previous frame.
+
         cv::Mat gray;
         cv::cvtColor(allFrames[i], gray, cv::COLOR_BGR2GRAY);
         cv::GaussianBlur(gray, gray, cv::Size(blurSize, blurSize), 0);
@@ -599,7 +638,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     // 1D Gaussian smoothing
     std::vector<double> smoothed = smoothSignal(totalMotions);
 
-    // Identify double-peak near-zero pattern
+    // Identify double-peak near-zero pattern : the hand enters (peak1), then places the card (valley), then retrests (peak2). Between the retreat and the entry of the next hand, there should be a near-zero motion frame. This pattern is used to identify the frames where the cards are placed on the table.
     PatternResult pat = findPattern(smoothed);
     if (!pat.success) {
         throw std::runtime_error("failed to find double-peak near-zero pattern in " + video.string());
@@ -616,7 +655,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::Mat frame_part1 = allFrames[pat.part1_idx];
     cv::Mat frame_part2 = allFrames[pat.part2_idx];
 
-    // Temporal subtraction
+    // Temporal subtraction : the only new thing from the first frame to part1 is the first card, and the only new thing from part1 to part2 is the second card. So we can isolate the cards by subtracting the frames and thresholding.
     cv::Mat first_diff, second_diff;
     cv::absdiff(frame_part1, first_frame, first_diff);
     cv::absdiff(frame_part2, frame_part1, second_diff);
@@ -626,7 +665,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::cvtColor(first_diff, fgray, cv::COLOR_BGR2GRAY);
     cv::cvtColor(second_diff, sgray, cv::COLOR_BGR2GRAY);
 
-    // Morphological refinement pipeline
+    // Morphological refinement pipeline : we need to clean up the difference masks to isolate the card shapes. We use thresholding, opening (to remove small noise), and closing (to fill small holes) to get a clean binary mask of the card regions.
     cv::Mat fmask, smask;
     const int binThresh = 30;
     cv::threshold(fgray, fmask, binThresh, 255, cv::THRESH_BINARY);
@@ -640,7 +679,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::morphologyEx(fmask, fmask, cv::MORPH_CLOSE, closeKernel);
     cv::morphologyEx(smask, smask, cv::MORPH_CLOSE, closeKernel);
 
-    // Blob detection & cropping helper (weighted by proximity to center)
+    // Blob detection & cropping helper (weighted by proximity to center) : we need to find the card bounding box in the difference mask, and crop it from the original frame. We use a fixed-size crop (400x400) centered on the detected card.
 
     cv::Mat first_card = extractBestCrop(fmask, frame_part1);
     cv::Mat second_card = extractBestCrop(smask, frame_part2);
@@ -652,11 +691,12 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     std::string s1 = video.stem().string() + "RESIZED";
     std::string s2 = video.stem().string() + "RESIZED";
 
+    // From the fixed 400x400 crop, refine it to get the best possible card crop, as close as possible to the actual card edges.
+
     cv::Mat resized_first_card = extractAndNormalizeCard(first_card, debug, s1 );
     cv::Mat resized_second_card = extractAndNormalizeCard(second_card, debug, s2 );
-    
-    //std::optional<CardPrediction> firstPred = classifier_.classify(first_card);
-    //std::optional<CardPrediction> secondPred = classifier_.classify(second_card);
+
+    // Feature-based card classification using ORB descriptors and brute-force matching. We compare the extracted card crops against the preprocessed reference cards to predict which card was played.
 
     std::optional<CardPrediction> firstPred  = featurePatternMatch(resized_first_card,  processed_references, orb);
     std::optional<CardPrediction> secondPred = featurePatternMatch(resized_second_card, processed_references, orb);
