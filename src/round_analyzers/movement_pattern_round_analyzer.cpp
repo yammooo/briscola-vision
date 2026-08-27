@@ -81,7 +81,27 @@ cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, briscola::DebugSink*
         }
     }
 
-    if (bestAreaDiff == 1e9) return {}; // Nessun quadrilatero valido trovato
+    if (bestAreaDiff == 1e9) {
+        cv::Mat blur_gray;
+        cv::GaussianBlur(gray, blur_gray, cv::Size(5, 5), 0);
+
+        int template_w = 180;
+        int template_h = 300;
+        cv::Mat dummy_card = cv::Mat::ones(cv::Size(template_w, template_h), CV_8UC1) * 255;
+
+        cv::Mat result;
+        cv::matchTemplate(blur_gray, dummy_card, result, cv::TM_CCORR_NORMED);
+
+        double minVal, maxVal;
+        cv::Point minLoc, maxLoc;
+        cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
+
+        bestRect = cv::Rect(maxLoc.x, maxLoc.y, template_w, template_h);
+    }
+
+    if (bestRect.area() == 0) {
+        bestRect = cv::Rect(50, 50, 300, 300);
+    }
 
     cv::Mat final_card = target_crop(bestRect).clone();
 
@@ -415,6 +435,15 @@ cv::Mat renderSignalPlot(
 }
 
 } // anonymous namespace
+
+
+
+
+
+
+
+
+
 
 MovementPatternRoundAnalyzer::MovementPatternRoundAnalyzer(
     const std::vector<CardReference>& references,
