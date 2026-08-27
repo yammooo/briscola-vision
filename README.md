@@ -43,6 +43,35 @@ The final configuration uses `--orb`, a one-level ORB extractor with 5,000 keypo
 
 This configuration is deliberately offline: it took about 28 to 34 minutes per game. The main cost is local-feature matching, not YOLO: every detected crop and its 180-degree rotation are matched against all 40 references. The high keypoint count improves recognition but greatly increases descriptor extraction, mask construction, and brute-force comparisons; it is therefore unsuitable for real-time use, which is outside this project's objective.
 
+## Movement-pattern pipeline
+
+This pipeline was built as a fast alternative to the YOLO/SIFT pipeline. The goal was to process each round in about 30 seconds, and it was achieved by identifying only **3 frames per round** that are used for card recognition, instead of scanning every fifth frame.
+
+### Core intuition
+
+The hand movements of the players are a telltale sign that a card has been placed on the table. When a player plays a card, its hand enters the frame causing a spike in "movement", then the hand slows down to place the card causing the movement to lower temporarily, then the hand draws back causing a second spike in movement. This pattern occurs twice per round — once per player — and the still frames that follow each pattern are exactly the moments when the newly placed cards are clearly visible on the table. 
+By taking the difference between the very first frame and the frame after the first placement, we get the position of the newly placed card. By taking the difference of the frame with first card placement and the frame with the second card placement we get the position of the second played card. 
+
+### How it works
+
+**Round analysis** (`MovementPatternRoundAnalyzer`): computes per-frame total motion using inter-frame absolute difference. The signal is smoothed with a Gaussian kernel. A sequential state machine then scans for two wave patterns, each of the form `Peak → valley → Peak → near-zero`. The two near-zero frames (`frame_part1`, `frame_part2`) are when the hands have retreated and the cards are lying still. Temporal subtraction (`frame_part1 − first_frame` for the first card, `frame_part2 − frame_part1` for the second) isolates the newly appeared card in each case. A blob detector crops the region of interest, and template matching (`simplePatternMatch`, `TM_CCOEFF_NORMED`) classifies the card against the 40 reference scans.
+
+**Briscola detection** (`FirstFrameBriscolaProvider`): opens only the first frame of round 1, where the briscola card is lying face-up on the table. It runs SIFT on the full frame and matches against pre-computed SIFT descriptors of the 40 reference cards using Lowe's ratio test followed by RANSAC homography verification. The card with the most geometric inliers (≥ 10) is selected as the briscola.
+
+### Strengths
+
+- **Speed**: ~30 seconds per round versus 28–34 minutes for YOLO/SIFT.
+- **No neural network required**: no ONNX model, no GPU, no training data needed.
+- **Robust leader detection**: the half of the frame (top/bottom) where the first motion burst occurs directly identifies which player led the round.
+
+### Weaknesses and known failure mode
+
+The pipeline relies on the assumption that **each player's hand fully retreats before the other player acts or before the cards are collected**. This assumption fails in game 3, where players sometimes pick up the cards while the second hand is still retreating, or the winner enters the frame before a stable still moment is reached. In those cases, `frame_part1` or `frame_part2` may not land on a clean card-only frame, leading to wrong crops that contain only hands or arms.  Games 1, 2, and 4 respect the assumption well and the pipeline performs significantly better on them.
+
+Use this pipeline when speed matters and game footage follows a clear play-and-retreat pattern. Use YOLO/SIFT when maximum accuracy is the priority, and when the play and retreat pattern is ot followed.
+
+
+
 ## Build
 
 Install OpenCV. On Fedora:
