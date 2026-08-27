@@ -27,7 +27,7 @@ static Suit parseSuitFromString(const std::string& s) {
     throw std::runtime_error("invalid suit string: " + s);
 }
 
-// Helper: open first frame from a video file
+
 static std::optional<cv::Mat> openFirstFrame(const std::filesystem::path& videoPath) {
     cv::VideoCapture cap(videoPath.string());
     if (!cap.isOpened()) return std::nullopt;
@@ -46,7 +46,8 @@ static void extractSIFT(const cv::Ptr<cv::SIFT>& sift, const cv::Mat& img, std::
     sift->detectAndCompute(img, {}, kpts, desc);
 }
 
-// Helper: match one template against the frame descriptors and return RANSAC inlier count
+// Match one template against the frame descriptors and return RANSAC inlier count
+// We need to be very torough here, because the template may be very small and the frame may have many features. We use Lowe's ratio test and RANSAC to filter out bad matches.
 static int countInliersForTemplate(cv::BFMatcher& matcher,
     const std::vector<cv::KeyPoint>& tplKpts,
     const cv::Mat& tplDesc,
@@ -55,7 +56,12 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
 {
     if (tplDesc.empty() || frameDesc.empty()) return 0;
     std::vector<std::vector<cv::DMatch>> knn;
+
+    // Perform KNN matching with k=2 for Lowe's ratio test, to find good matches between the template and the frame
+
     try { matcher.knnMatch(tplDesc, frameDesc, knn, 2); } catch (...) { return 0; }
+
+    // Find good matches using Lowe's ratio test
 
     std::vector<cv::DMatch> good;
     const float ratio = 0.75f;
@@ -65,12 +71,16 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
     }
     if (good.size() < 4) return 0;
 
+    // Extract the matched keypoints from the template and the frame
+
     std::vector<cv::Point2f> ptsTpl, ptsFrame;
     ptsTpl.reserve(good.size()); ptsFrame.reserve(good.size());
     for (const auto& dmatch : good) {
         ptsTpl.push_back(tplKpts[dmatch.queryIdx].pt);
         ptsFrame.push_back(frameKpts[dmatch.trainIdx].pt);
     }
+
+    // Use RANSAC to find a homography and count inliers 
 
     cv::Mat mask;
     cv::Mat homo = cv::findHomography(ptsTpl, ptsFrame, cv::RANSAC, 3.0, mask);
@@ -104,6 +114,8 @@ void FirstFrameBriscolaProvider::ensureTemplatesLoaded() {
 }
 
 void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::path& folder) {
+
+    // Create SIFT detector to find features in the templates
     const cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
 
     std::vector<std::filesystem::path> files;
@@ -114,6 +126,9 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
     std::sort(files.begin(), files.end());
 
     for (const auto& path : files) {
+
+        // look at all the templates in the folder, and parse the rank and suit from the filename
+
         const std::string stem = path.stem().string();
         const auto dash = stem.find('-');
         if (dash == std::string::npos) continue;
@@ -126,11 +141,15 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
         cv::Mat gray;
         cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
 
+        // Extract SIFT features from the template
+
         std::vector<cv::KeyPoint> kpts;
         cv::Mat desc;
         sift->detectAndCompute(gray, {}, kpts, desc);
 
         if (desc.empty()) continue;
+
+        // Store the template. It contains the card identity, keypoints, and descriptors.
 
         CardTemplate tpl;
         tpl.card = Card{rank, suit};
@@ -145,11 +164,11 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
     const std::vector<RoundObservation>&,
     DebugSink* debug
 ) {
+    // calculate SIFT features for the templates, then for the first frame of the first round, and match them to find the best candidate for briscola
     ensureTemplatesLoaded();
     if (templates_.empty()) return std::nullopt;
 
-    // Prefer the file whose name contains "round1.mp4" (e.g. game1round1.mp4).
-    // If not present, fall back to the first provided video.
+    //we look for the first frame of the first round. 
     std::filesystem::path target;
     for (const auto& p : videos) {
         const std::string fname = p.filename().string();
@@ -158,9 +177,10 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
     if (target.empty() && !videos.empty()) target = videos.front();
     if (target.empty()) return std::nullopt;
 
+    // Extract SIFT features from the first frame
         const cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
         cv::BFMatcher matcher(cv::NORM_L2);
-
+    
         auto maybeFrame = openFirstFrame(target);
         if (!maybeFrame) return std::nullopt;
         cv::Mat frame = *maybeFrame;
@@ -168,7 +188,7 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
         cv::Mat gray;
         toGray(frame, gray);
 
-        // Direct feature extraction on the full frame (no warping)
+        
         std::vector<cv::KeyPoint> frameKpts;
         cv::Mat frameDesc;
         extractSIFT(sift, gray, frameKpts, frameDesc);
@@ -176,6 +196,8 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
 
         int bestInliers = 0;
         std::optional<Card> bestCard;
+
+        // Search for the best match in the templates
 
         for (const auto& tpl : templates_) {
             const int inliers = countInliersForTemplate(matcher, tpl.keypoints, tpl.descriptors, frameKpts, frameDesc);
