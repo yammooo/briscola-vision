@@ -422,7 +422,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
 }
 
 
-/*cv::Mat renderSignalPlot(
+cv::Mat renderSignalPlot(
     const std::vector<double>& smoothed,
     const std::vector<int>& raw,
     const PatternResult& pat,
@@ -519,7 +519,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     cv::putText(plot, "Smoothed", cv::Point(legX + 110, 24), cv::FONT_HERSHEY_SIMPLEX, 0.38, cv::Scalar(240, 180, 50), 1);
 
     return plot;
-}*/
+}
 
 
 } // anonymous namespace
@@ -570,7 +570,7 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::GaussianBlur(prevGray, prevGray, cv::Size(blurSize, blurSize), 0);
 
     std::vector<CardReference> raw_references = references_;
-    cv::Ptr<cv::ORB> orb = cv::ORB::create(500);
+    cv::Ptr<cv::ORB> orb = cv::ORB::create(1000);
     std::vector<CardFeatureReference> processed_references = preprocessReferences(raw_references, orb);
 
     for (int i = 1; i < n; ++i) {
@@ -694,14 +694,14 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         std::string s5 = video.stem().string() + "_center_resting_frame";
         debug->publishImage("capture", s5, 0, frame_part2, true, false);
         // 6) smoothed signal plot
-        //std::string s6 = video.stem().string() + "_smoothed_signal_plot";
-        /*cv::Mat plotImg = renderSignalPlot(
+        std::string s6 = video.stem().string() + "_smoothed_signal_plot";
+        cv::Mat plotImg = renderSignalPlot(
             smoothed,
             totalMotions,
             pat,
             video.stem().string() + " - Pattern Signal & Extrema"
-        );*/
-        //debug->publishImage("capture", s6, 0, plotImg, true, false);
+        );
+        debug->publishImage("capture", s6, 0, plotImg, true, false);
     }
 
     return obs;
