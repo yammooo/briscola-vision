@@ -434,6 +434,90 @@ cv::Mat renderSignalPlot(
     return plot;
 }
 
+// ---------------------------------------------------------------------------
+// simplePatternMatch
+// ---------------------------------------------------------------------------
+// Classifies a card crop against a set of reference images using normalized
+// cross-correlation, trying both the upright and 180°-flipped orientations.
+//
+// Steps:
+//   1. Force landscape: rotate portrait crops 90° clockwise.
+//   2. Resize to match the reference image dimensions exactly.
+//   3. Convert to grayscale; build a 180°-rotated copy for upside-down cards.
+//   4. Run cv::matchTemplate (TM_CCOEFF_NORMED) for both orientations against
+//      every reference and keep track of the globally best-scoring match.
+//   5. Return the best-matching CardPrediction (card + confidence score).
+// ---------------------------------------------------------------------------
+std::optional<CardPrediction> simplePatternMatch(
+    const cv::Mat& target_crop,
+    const std::vector<CardReference>& references
+) {
+    if (target_crop.empty() || references.empty()) return std::nullopt;
+
+    // 1. Force landscape orientation
+    cv::Mat landscape;
+    if (target_crop.rows > target_crop.cols) {
+        // portrait → rotate 90° clockwise to make it horizontal
+        cv::rotate(target_crop, landscape, cv::ROTATE_90_CLOCKWISE);
+    } else {
+        landscape = target_crop;
+    }
+
+    // Use the first reference to determine the target size
+    // (all references are expected to have the same dimensions)
+    const cv::Size refSize = references[0].image.size();
+
+    // 2. Resize the landscape crop to exactly match reference dimensions
+    cv::Mat resized;
+    cv::resize(landscape, resized, refSize, 0, 0, cv::INTER_LINEAR);
+
+    // 3. Convert to grayscale
+    cv::Mat gray;
+    if (resized.channels() == 1) {
+        gray = resized;
+    } else {
+        cv::cvtColor(resized, gray, cv::COLOR_BGR2GRAY);
+    }
+
+    // Build 180°-rotated copy (accounts for cards thrown upside down)
+    cv::Mat gray180;
+    cv::rotate(gray, gray180, cv::ROTATE_180);
+
+    // 4. Template-matching loop
+    double best_score = -1.0;
+    std::optional<Card> best_card;
+
+    for (const auto& ref : references) {
+        // The reference image must be grayscale and the same size as our crop.
+        // matchTemplate requires: result = (W-w+1) x (H-h+1).
+        // Since crop and ref are the same size, result is 1×1.
+        cv::Mat result_up, result_flip;
+
+        cv::matchTemplate(gray,    ref.image, result_up,   cv::TM_CCOEFF_NORMED);
+        cv::matchTemplate(gray180, ref.image, result_flip, cv::TM_CCOEFF_NORMED);
+
+        double minVal, maxUp, maxFlip;
+        cv::minMaxLoc(result_up,   nullptr, &maxUp);
+        cv::minMaxLoc(result_flip, nullptr, &maxFlip);
+
+        double score = std::max(maxUp, maxFlip);
+
+        
+        if (score > best_score) {
+            best_score = score;
+            best_card  = ref.card;
+
+            std::cout << "Rank: " << std::setw(2) << static_cast<int>(ref.card.rank)
+                      << " | Suit: " << static_cast<int>(ref.card.suit)
+                      << " | Score: " << std::fixed << std::setprecision(4) << score << std::endl;
+
+        }
+    }
+
+    if (!best_card.has_value()) return std::nullopt;
+    return CardPrediction{ *best_card, static_cast<float>(best_score) };
+}
+
 } // anonymous namespace
 
 
@@ -562,8 +646,11 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::Mat resized_first_card = extractAndNormalizeCard(first_card, debug, s1 );
     cv::Mat resized_second_card = extractAndNormalizeCard(second_card, debug, s2 );
     
-    std::optional<CardPrediction> firstPred = classifier_.classify(first_card);
-    std::optional<CardPrediction> secondPred = classifier_.classify(second_card);
+    //std::optional<CardPrediction> firstPred = classifier_.classify(first_card);
+    //std::optional<CardPrediction> secondPred = classifier_.classify(second_card);
+
+    std::optional<CardPrediction> firstPred  = simplePatternMatch(resized_first_card,  references_);
+    std::optional<CardPrediction> secondPred = simplePatternMatch(resized_second_card, references_);
     
     RoundObservation obs;
     obs.leader = leader;
