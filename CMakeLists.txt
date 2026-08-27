@@ -42,6 +42,10 @@ target_link_libraries(briscola_finder PRIVATE briscola)
 add_executable(movement_pattern apps/movement_pattern.cpp)
 target_link_libraries(movement_pattern PRIVATE briscola)
 
+add_executable(evaluate_movement_pattern apps/evaluate_movement_pattern.cpp)
+target_link_libraries(evaluate_movement_pattern PRIVATE briscola)
+
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(briscola_tests tests/most_frequent_briscola_provider_test.cpp)
