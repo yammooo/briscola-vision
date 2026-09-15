@@ -7,7 +7,9 @@
 #include <opencv2/features2d.hpp>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/videoio.hpp>
-#include <opencv2/geometry.hpp>
+#if __has_include(<opencv2/geometry/2d.hpp>)
+#include <opencv2/geometry/2d.hpp>
+#endif
 
 #include <algorithm>
 #include <chrono>
