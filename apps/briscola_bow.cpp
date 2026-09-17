@@ -1,12 +1,3 @@
-#include "briscola/briscola_providers/k_means_briscola_provider.hpp"
-#include "briscola/debug.hpp"
-
-#include <filesystem>
-#include <iostream>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
 /// @brief Smoke test for the BoVW-based KMeansBriscolaProvider.
 ///
 /// Runs the provider on the first video of a folder and prints the
@@ -16,6 +7,17 @@
 ///
 /// Usage:
 ///   briscola_bow <roundVideosFolder> [--debug-window] [--debug-dir DIR]
+#include "briscola/briscola_providers/k_means_briscola_provider.hpp"
+#include "briscola/debug.hpp"
+
+#include <algorithm>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0]
@@ -78,16 +80,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        std::cout << "Briscola: " << card->rank << " " << su
-}
-/// @brief Smoke test for the BoW-based KMeansBriscolaProvider.
-///
-/// Runs the provider on the first video of a folder and prints the
-/// recognized briscola. This binary exists only to exercise the provider
-/// end-to-end without pulling in the RoundAnalyzer machinery (which
-/// expects a full round, three cards, movement patterns, and so on).
-///
-itName(card->suit) << "\n";
+        std::cout << "Briscola: " << card->rank << " " << suitName(card->suit) << "\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";

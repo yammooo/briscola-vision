@@ -86,16 +86,6 @@ static Player parsePlayer(const std::string& value) {
     throw std::runtime_error("invalid player: " + value);
 }
 
-static const char* suitName(Suit suit) {
-    switch (suit) {
-        case Suit::Cups: return "cups";
-        case Suit::Coins: return "coins";
-        case Suit::Clubs: return "clubs";
-        case Suit::Spades: return "spades";
-    }
-    throw std::runtime_error("invalid suit");
-}
-
 static const char* playerName(Player player) {
     return player == Player::North ? "North" : "South";
 }

@@ -669,18 +669,6 @@ namespace briscola {
     
     //######################### CARD RECOGNITION (KMEANS + BOW) #########################    
     
-    /// @brief Maps a Suit enum value to its lowercase English name, for
-    /// display in debug overlays and logs. Inverse of suitFromName().
-    std::string suitName(Suit suit) {
-        switch (suit) {
-            case Suit::Cups:   return "cups";
-            case Suit::Coins:  return "coins";
-            case Suit::Clubs:  return "clubs";
-            case Suit::Spades: return "spades";
-        }
-        return "unknown";
-    }
-
     /// @brief Lazily loads the BoW classifier from disk on first use.
     /// Training is done offline by the bow_train binary; at query time we only
     /// load the vocabulary and the template histograms.

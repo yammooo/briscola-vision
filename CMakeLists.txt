@@ -4,6 +4,8 @@ project(briscola_vision LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+add_compile_options(-Wall -Wextra -Wpedantic)
+
 find_package(OpenCV QUIET COMPONENTS core dnn features2d calib3d highgui imgcodecs imgproc videoio objdetect)
 if(NOT OpenCV_FOUND)
     # Fallback for OpenCV 5 packaging: accept any provided OpenCV configuration

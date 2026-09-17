@@ -11,16 +11,6 @@
 #include <random>
 
 namespace briscola {
-
-/// @brief Maps the suit token found in a template filename to the
-/// Suit enum.
-Suit suitFromName(const std::string& suitName) {
-    if (suitName == "clubs") return Suit::Clubs;
-    if (suitName == "cups")   return Suit::Cups;
-    if (suitName == "coins")  return Suit::Coins;
-    if (suitName == "spades")   return Suit::Spades;
-    throw std::runtime_error("Unknown suit name in template filename: " + suitName);
-}
 //############################ DATA AUGMENTATION HELPER ############################
 /// @brief Copies the input into a new Mat and paints a black rectangle over
 /// a portion of it, simulating a card partially covered by another card.

@@ -36,6 +36,23 @@ int cardPoints(int rank) {
     }
 }
 
+std::string suitName(Suit suit) {
+    switch (suit) {
+        case Suit::Cups:   return "cups";
+        case Suit::Coins:  return "coins";
+        case Suit::Clubs:  return "clubs";
+        case Suit::Spades: return "spades";
+    }
+    return "unknown";
+}
+
+Suit suitFromName(const std::string& name) {
+    if (name == "clubs")  return Suit::Clubs;
+    if (name == "cups")   return Suit::Cups;
+    if (name == "coins")  return Suit::Coins;
+    if (name == "spades") return Suit::Spades;
+    throw std::invalid_argument("Unknown suit name: " + name);
+}
 RoundOutcome evaluateRound(
     const Card& northCard,
     const Card& southCard,

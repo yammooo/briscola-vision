@@ -4,6 +4,7 @@
 /** @file model.hpp @brief Domain and result data types. */
 
 #include <optional>
+#include <string>
 #include <vector>
 
 /** @brief Types and operations for Briscola game analysis. */
@@ -35,6 +36,14 @@ struct Card {
     int rank;   ///< Rank in the inclusive range 1--10.
     Suit suit;  ///< Card suit.
 };
+
+/** @brief Returns the lowercase name of a suit ("cups", "coins", "clubs",
+"spades"). Inverse of suitFromName(). Used for debug output and logs.
+*/
+std::string suitName(Suit suit);
+
+/** @brief Maps the suit token found in a template filename to the Suit enum.  */
+Suit suitFromName(const std::string& name);
 
 /** @brief Card predicted by the vision pipeline. */
 struct CardPrediction {
