@@ -46,8 +46,7 @@ static void extractSIFT(const cv::Ptr<cv::SIFT>& sift, const cv::Mat& img, std::
     sift->detectAndCompute(img, {}, kpts, desc);
 }
 
-// Match one template against the frame descriptors and return RANSAC inlier count
-// We need to be very torough here, because the template may be very small and the frame may have many features. We use Lowe's ratio test and RANSAC to filter out bad matches.
+// EFFICIENCY IMPROVED
 static int countInliersForTemplate(cv::BFMatcher& matcher,
     const std::vector<cv::KeyPoint>& tplKpts,
     const cv::Mat& tplDesc,
@@ -57,11 +56,7 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
     if (tplDesc.empty() || frameDesc.empty()) return 0;
     std::vector<std::vector<cv::DMatch>> knn;
 
-    // Perform KNN matching with k=2 for Lowe's ratio test, to find good matches between the template and the frame
-
     try { matcher.knnMatch(tplDesc, frameDesc, knn, 2); } catch (...) { return 0; }
-
-    // Find good matches using Lowe's ratio test
 
     std::vector<cv::DMatch> good;
     const float ratio = 0.75f;
@@ -71,8 +66,6 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
     }
     if (good.size() < 4) return 0;
 
-    // Extract the matched keypoints from the template and the frame
-
     std::vector<cv::Point2f> ptsTpl, ptsFrame;
     ptsTpl.reserve(good.size()); ptsFrame.reserve(good.size());
     for (const auto& dmatch : good) {
@@ -80,13 +73,15 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
         ptsFrame.push_back(frameKpts[dmatch.trainIdx].pt);
     }
 
-    // EFFICIENCY IMPROVEMENT
     cv::Mat mask;
     cv::Mat homo = cv::findHomography(ptsTpl, ptsFrame, cv::USAC_MAGSAC, 3.0, mask, 2000, 0.995);
     if (homo.empty()) {
         homo = cv::findHomography(ptsTpl, ptsFrame, cv::RANSAC, 3.0, mask, 2000, 0.995);
     }
     if (homo.empty()) return 0;
+    double det = homo.at<double>(0,0) * homo.at<double>(1,1) - homo.at<double>(0,1) * homo.at<double>(1,0);
+    if (std::abs(det) < 1e-6) return 0;
+
     int inliers = 0;
     for (int i = 0; i < mask.rows; ++i) if (mask.at<uchar>(i)) ++inliers;
     return inliers;
@@ -96,7 +91,6 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
 
 FirstFrameBriscolaProvider::FirstFrameBriscolaProvider()
 {
-    // Default reference folder (assumed present): data/Briscola_Trentine
     referenceFolder_ = std::filesystem::path("data") / "Briscola_Trentine";
 }
 
@@ -117,8 +111,8 @@ void FirstFrameBriscolaProvider::ensureTemplatesLoaded() {
 
 void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::path& folder) {
 
-    // Create SIFT detector to find features in the templates
-    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
+    // EFFICIENCY IMPROVED
+    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create(0, 3, 0.03, 10, 1.6);
 
     std::vector<std::filesystem::path> files;
     for (const auto& entry : std::filesystem::directory_iterator(folder)) {
@@ -128,8 +122,6 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
     std::sort(files.begin(), files.end());
 
     for (const auto& path : files) {
-
-        // look at all the templates in the folder, and parse the rank and suit from the filename
 
         const std::string stem = path.stem().string();
         const auto dash = stem.find('-');
@@ -143,15 +135,11 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
         cv::Mat gray;
         cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
 
-        // Extract SIFT features from the template
-
         std::vector<cv::KeyPoint> kpts;
         cv::Mat desc;
         sift->detectAndCompute(gray, {}, kpts, desc);
 
         if (desc.empty()) continue;
-
-        // Store the template. It contains the card identity, keypoints, and descriptors.
 
         CardTemplate tpl;
         tpl.card = Card{rank, suit};
@@ -166,53 +154,80 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
     const std::vector<RoundObservation>&,
     DebugSink* debug
 ) {
-    // calculate SIFT features for the templates, then for the first frame of the first round, and match them to find the best candidate for briscola
     ensureTemplatesLoaded();
     if (templates_.empty()) return std::nullopt;
 
-    //we look for the first frame of the first round. 
-    std::filesystem::path target;
+    // EFFICIENCY IMPROVED
+    std::vector<std::filesystem::path> targetVideos;
     for (const auto& p : videos) {
         const std::string fname = p.filename().string();
-        if (fname.find("round1.mp4") != std::string::npos) { target = p; break; }
+        if (fname.find("round1.mp4") != std::string::npos ||
+            fname.find("round2.mp4") != std::string::npos ||
+            fname.find("round3.mp4") != std::string::npos) {
+            targetVideos.push_back(p);
+        }
     }
-    if (target.empty() && !videos.empty()) target = videos.front();
-    if (target.empty()) return std::nullopt;
+    if (targetVideos.empty()) {
+        for (size_t i = 0; i < std::min<size_t>(3, videos.size()); ++i) {
+            targetVideos.push_back(videos[i]);
+        }
+    }
+    if (targetVideos.empty()) return std::nullopt;
 
-    // Extract SIFT features from the first frame
-        const cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
-        cv::BFMatcher matcher(cv::NORM_L2);
-    
+    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create(0, 3, 0.03, 10, 1.6);
+    cv::BFMatcher matcher(cv::NORM_L2);
+
+    std::vector<int> templateScores(templates_.size(), 0);
+
+    for (const auto& target : targetVideos) {
         auto maybeFrame = openFirstFrame(target);
-        if (!maybeFrame) return std::nullopt;
+        if (!maybeFrame) continue;
         cv::Mat frame = *maybeFrame;
 
         cv::Mat gray;
         toGray(frame, gray);
 
-        
         std::vector<cv::KeyPoint> frameKpts;
         cv::Mat frameDesc;
         extractSIFT(sift, gray, frameKpts, frameDesc);
-        if (frameDesc.empty() || frameKpts.empty()) return std::nullopt;
+        if (frameDesc.empty() || frameKpts.empty()) continue;
 
-        int bestInliers = 0;
-        std::optional<Card> bestCard;
+        int frameBest = 0;
+        int frameBestIdx = -1;
+        int frameSecondBest = 0;
 
-        // Search for the best match in the templates
-
-        for (const auto& tpl : templates_) {
-            const int inliers = countInliersForTemplate(matcher, tpl.keypoints, tpl.descriptors, frameKpts, frameDesc);
-            const int MIN_INLIERS = 10;
-            if (inliers > bestInliers && inliers >= MIN_INLIERS) {
-                bestInliers = inliers;
-                bestCard = tpl.card;
+        for (size_t t = 0; t < templates_.size(); ++t) {
+            const int inliers = countInliersForTemplate(matcher, templates_[t].keypoints, templates_[t].descriptors, frameKpts, frameDesc);
+            if (inliers >= 8) {
+                templateScores[t] += inliers;
+            }
+            if (inliers > frameBest) {
+                frameSecondBest = frameBest;
+                frameBest = inliers;
+                frameBestIdx = static_cast<int>(t);
+            } else if (inliers > frameSecondBest) {
+                frameSecondBest = inliers;
             }
         }
 
-        if (debug && bestCard) debug->publishText("first-frame", "provider", 0, "Selected briscola candidate");
+        if (frameBestIdx != -1 && frameBest >= 10 && frameBest > frameSecondBest) {
+            templateScores[frameBestIdx] += (frameBest - frameSecondBest);
+        }
+    }
 
-        return bestCard;
+    int bestScore = 0;
+    std::optional<Card> bestCard;
+
+    for (size_t t = 0; t < templates_.size(); ++t) {
+        if (templateScores[t] > bestScore && templateScores[t] >= 10) {
+            bestScore = templateScores[t];
+            bestCard = templates_[t].card;
+        }
+    }
+
+    if (debug && bestCard) debug->publishText("first-frame", "provider", 0, "Selected briscola candidate");
+
+    return bestCard;
 }
 
 } // namespace briscola
