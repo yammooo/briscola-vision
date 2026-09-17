@@ -12,38 +12,6 @@
 
 namespace briscola {
 //############################ DATA AUGMENTATION HELPER ############################
-/// @brief Copies the input into a new Mat and paints a black rectangle over
-/// a portion of it, simulating a card partially covered by another card.
-///
-/// @param src   Input card image (BGR).
-/// @param mode  Which part to cover:
-///              1 = top half
-///              2 = bottom half
-///              3 = left half
-///              4 = right half
-///              5 = top third
-///              6 = bottom third
-///              7 = central vertical stripe (simulates another card on top)
-cv::Mat occludeCard(const cv::Mat& src, int mode) {
-    cv::Mat out = src.clone();
-    const int W = out.cols;
-    const int H = out.rows;
-
-    cv::Rect cover;
-    switch (mode) {
-        case 1: cover = cv::Rect(0, 0, W, H / 2); break; // top half
-        case 2: cover = cv::Rect(0, H / 2, W, H - H / 2); break; // bottom half
-        case 3: cover = cv::Rect(0, 0, W / 2, H); break; // left half
-        case 4: cover = cv::Rect(W / 2, 0, W - W / 2, H); break; // right half
-        case 5: cover = cv::Rect(0, 0, W, H / 3); break; // top third
-        case 6: cover = cv::Rect(0, 2 * H / 3, W, H - 2 * H / 3); break; // bottom third
-        case 7: cover = cv::Rect(W / 4, 0, W / 2, H); break; // central vertical stripe
-        default: return out;
-    }
-
-    cv::rectangle(out, cover, cv::Scalar(0, 0, 0), cv::FILLED);
-    return out;
-}
 
 /// @brief Rotates the card by `angle` degrees around its center, using
 /// border replication to avoid black corners.
@@ -101,9 +69,10 @@ cv::Mat blurCard(const cv::Mat& src, int ksize) {
 }
 
 /// @brief Simulates the crop that the detector produces when the card is
-/// half-covered by another card. The output has the same aspect ratio as
-/// the original card, but only one half of it contains the card; the other
-/// half is filled with a "cover" (black by default, or a color).
+/// half-covered by another card. The output contains only the visible
+/// portion of the card, with the same geometry the detector produces at
+/// query time: a H/2 × W (or W/2 × H) crop that ends at the occlusion
+/// boundary, with no covered area included.
 ///
 /// @param src    Input card image (BGR), assumed to be the full card.
 /// @param mode   1 = top half visible, bottom half covered
@@ -112,39 +81,35 @@ cv::Mat blurCard(const cv::Mat& src, int ksize) {
 ///               4 = right half visible, left half covered
 ///               5 = top 2/3 visible, bottom 1/3 covered
 ///               6 = bottom 2/3 visible, top 1/3 covered
-/// @param cover  Color to use for the covered part. Default black.
-cv::Mat cropHalfWithContext(const cv::Mat& src, int mode,
-                            const cv::Scalar& cover = cv::Scalar(0, 0, 0)) {
+
+cv::Mat cropHalfWithContext(const cv::Mat& src, int mode) {
     const int W = src.cols;
     const int H = src.rows;
 
-    // The output has the same size as the input. The visible part is one
-    // half (or 2/3) of the original; the other part is filled with `cover`.
-    cv::Mat out = src.clone();
-
+    cv::Mat out;
     switch (mode) {
-        case 1:  // top half visible, bottom covered
-            cv::rectangle(out, cv::Rect(0, H / 2, W, H - H / 2), cover, cv::FILLED);
+        case 1:  // top half visible
+            out = src(cv::Rect(0, 0, W, H / 2)).clone();
             break;
-        case 2:  // bottom half visible, top covered
-            cv::rectangle(out, cv::Rect(0, 0, W, H / 2), cover, cv::FILLED);
+        case 2:  // bottom half visible
+            out = src(cv::Rect(0, H / 2, W, H - H / 2)).clone();
             break;
-        case 3:  // left half visible, right covered
-            cv::rectangle(out, cv::Rect(W / 2, 0, W - W / 2, H), cover, cv::FILLED);
+        case 3:  // left half visible
+            out = src(cv::Rect(0, 0, W / 2, H)).clone();
             break;
-        case 4:  // right half visible, left covered
-            cv::rectangle(out, cv::Rect(0, 0, W / 2, H), cover, cv::FILLED);
+        case 4:  // right half visible
+            out = src(cv::Rect(W / 2, 0, W - W / 2, H)).clone();
             break;
-        case 5:  // top 2/3 visible, bottom 1/3 covered
-            cv::rectangle(out, cv::Rect(0, 2 * H / 3, W, H - 2 * H / 3), cover, cv::FILLED);
+        case 5:  // top 2/3 visible
+            out = src(cv::Rect(0, 0, W, 2 * H / 3)).clone();
             break;
-        case 6:  // bottom 2/3 visible, top 1/3 covered
-            cv::rectangle(out, cv::Rect(0, 0, W, H / 3), cover, cv::FILLED);
+        case 6:  // bottom 2/3 visible
+            out = src(cv::Rect(0, H / 3, W, H - H / 3)).clone();
             break;
         default:
+            out = src.clone();
             break;
     }
-
     return out;
 }
 /// @brief Parses a template filename stem "<rank>-<suit>" into a Card.
@@ -291,20 +256,7 @@ void BoWClassifier::train(
         // under which the card might be observed.
         std::vector<cv::Mat> variants;
         variants.push_back(image);
-        variants.push_back(rotateCard(image, 180.0));
-        // Occlusion: 7 modes. The detector almost always sees the briscola
-        // partially covered by another card, the player's hand, or the deck.
-        // Without occlusion variants, the vocabulary contains only pristine
-        // full-card descriptors, and any query crop that is missing a chunk
-        // of the card will match poorly. The 7 modes cover the most common
-        // occlusion patterns: top half, bottom half, left half, right half,
-        // top third, bottom third, central vertical stripe. The last one
-        // simulates a card laid on top of another card, leaving only the
-        // two side strips visible.
-        for (int occ = 1; occ <= 7; ++occ) {
-            variants.push_back(occludeCard(image, occ));
-        }
-
+        
         // Rotation: +-30°, +-15°, +90°, +180°. SIFT is rotation-invariant in
         // principle, but the crop the detector produces is not: it is
         // aligned to the rotated bounding box of the blob, which is not
@@ -364,18 +316,6 @@ void BoWClassifier::train(
         // detector has a bit more of the card to work with.
         variants.push_back(cropHalfWithContext(image, 5));  // top 2/3 visible
         variants.push_back(cropHalfWithContext(image, 6));  // bottom 2/3 visible
-
-        // Same variants with a dark gray cover instead of black. The
-        // occluding card in the real game is rarely pure black; it has a
-        // printed back with a mid-gray texture. Using a single cover color
-        // makes the vocabulary overfit to that color; two covers (black
-        // and dark gray) make it more robust to the actual cover's
-        // appearance.
-        const cv::Scalar darkGray(40, 40, 40);
-        variants.push_back(cropHalfWithContext(image, 1, darkGray));
-        variants.push_back(cropHalfWithContext(image, 2, darkGray));
-        variants.push_back(cropHalfWithContext(image, 5, darkGray));
-        variants.push_back(cropHalfWithContext(image, 6, darkGray));
         
         // Random occlusions: 15 variants with a black rectangle of random
         // position and size. The systematic occlusions above always cover
@@ -390,31 +330,16 @@ void BoWClassifier::train(
         // makes the training reproducible: the vocabulary, and therefore
         // the classifier's behavior, do not depend on chance.
         std::mt19937 rng(42);
-        std::uniform_int_distribution<int> xDist(0, image.cols - 1);
-        std::uniform_int_distribution<int> yDist(0, image.rows - 1);
-        std::uniform_int_distribution<int> wDist(image.cols / 5, image.cols * 3 / 5);
-        std::uniform_int_distribution<int> hDist(image.rows / 5, image.rows * 3 / 5);
+        std::uniform_real_distribution<float> fracDist(0.4f, 0.9f);  // 40%-90% visibile
 
         for (int i = 0; i < 15; ++i) {
-            cv::Mat aug = image.clone();
-
-            int x = xDist(rng);
-            int y = yDist(rng);
-            int w = wDist(rng);
-            int h = hDist(rng);
-
-            // Clip the rectangle to the image bounds. Without this, a
-            // random rectangle starting near the right or bottom edge would
-            // extend beyond the image and cv::rectangle would silently
-            // clip it, producing a smaller cover than intended and
-            // biasing the distribution toward small occlusions in those
-            // regions.
-            w = std::min(w, image.cols - x);
-            h = std::min(h, image.rows - y);
-
-            cv::Rect r(x, y, w, h);
-            cv::rectangle(aug, r, cv::Scalar(0, 0, 0), cv::FILLED);
-            variants.push_back(aug);
+            const float fx = fracDist(rng);  // visible width fraction
+            const float fy = fracDist(rng);  // visible height fraction
+            const int cw = std::max(1, (int)(image.cols * fx));
+            const int ch = std::max(1, (int)(image.rows * fy));
+            const int cx = (image.cols - cw) / 2;  // centered
+            const int cy = (image.rows - ch) / 2;
+            variants.push_back(image(cv::Rect(cx, cy, cw, ch)).clone());
         }
 
                 std::cout << "  " << entry.path().filename().string()
