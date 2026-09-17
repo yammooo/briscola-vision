@@ -146,6 +146,7 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
     }
 }
 
+// EFFICIENCY IMPROVED
 std::optional<Card> FirstFrameBriscolaProvider::find(
     const std::vector<std::filesystem::path>& videos,
     const std::vector<RoundObservation>&,
@@ -154,71 +155,38 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
     ensureTemplatesLoaded();
     if (templates_.empty()) return std::nullopt;
 
-    // EFFICIENCY IMPROVED
-    std::vector<std::filesystem::path> targetVideos;
+    std::filesystem::path target;
     for (const auto& p : videos) {
         const std::string fname = p.filename().string();
-        if (fname.find("round1.mp4") != std::string::npos ||
-            fname.find("round2.mp4") != std::string::npos ||
-            fname.find("round3.mp4") != std::string::npos) {
-            targetVideos.push_back(p);
-        }
+        if (fname.find("round1.mp4") != std::string::npos) { target = p; break; }
     }
-    if (targetVideos.empty()) {
-        for (size_t i = 0; i < std::min<size_t>(3, videos.size()); ++i) {
-            targetVideos.push_back(videos[i]);
-        }
-    }
-    if (targetVideos.empty()) return std::nullopt;
+    if (target.empty() && !videos.empty()) target = videos.front();
+    if (target.empty()) return std::nullopt;
 
     const cv::Ptr<cv::SIFT> sift = cv::SIFT::create(0, 3, 0.03, 10, 1.6);
     cv::BFMatcher matcher(cv::NORM_L2);
 
-    std::vector<int> templateScores(templates_.size(), 0);
+    auto maybeFrame = openFirstFrame(target);
+    if (!maybeFrame) return std::nullopt;
+    cv::Mat frame = *maybeFrame;
 
-    for (const auto& target : targetVideos) {
-        auto maybeFrame = openFirstFrame(target);
-        if (!maybeFrame) continue;
-        cv::Mat frame = *maybeFrame;
+    cv::Mat gray;
+    toGray(frame, gray);
 
-        cv::Mat gray;
-        toGray(frame, gray);
+    std::vector<cv::KeyPoint> frameKpts;
+    cv::Mat frameDesc;
+    extractSIFT(sift, gray, frameKpts, frameDesc);
+    if (frameDesc.empty() || frameKpts.empty()) return std::nullopt;
 
-        std::vector<cv::KeyPoint> frameKpts;
-        cv::Mat frameDesc;
-        extractSIFT(sift, gray, frameKpts, frameDesc);
-        if (frameDesc.empty() || frameKpts.empty()) continue;
-
-        int frameBest = 0;
-        int frameBestIdx = -1;
-        int frameSecondBest = 0;
-
-        for (size_t t = 0; t < templates_.size(); ++t) {
-            const int inliers = countInliersForTemplate(matcher, templates_[t].keypoints, templates_[t].descriptors, frameKpts, frameDesc);
-            if (inliers >= 8) {
-                templateScores[t] += inliers;
-            }
-            if (inliers > frameBest) {
-                frameSecondBest = frameBest;
-                frameBest = inliers;
-                frameBestIdx = static_cast<int>(t);
-            } else if (inliers > frameSecondBest) {
-                frameSecondBest = inliers;
-            }
-        }
-
-        if (frameBestIdx != -1 && frameBest >= 10 && frameBest > frameSecondBest) {
-            templateScores[frameBestIdx] += (frameBest - frameSecondBest);
-        }
-    }
-
-    int bestScore = 0;
+    int bestInliers = 0;
     std::optional<Card> bestCard;
 
-    for (size_t t = 0; t < templates_.size(); ++t) {
-        if (templateScores[t] > bestScore && templateScores[t] >= 10) {
-            bestScore = templateScores[t];
-            bestCard = templates_[t].card;
+    for (const auto& tpl : templates_) {
+        const int inliers = countInliersForTemplate(matcher, tpl.keypoints, tpl.descriptors, frameKpts, frameDesc);
+        const int MIN_INLIERS = 10;
+        if (inliers > bestInliers && inliers >= MIN_INLIERS) {
+            bestInliers = inliers;
+            bestCard = tpl.card;
         }
     }
 
