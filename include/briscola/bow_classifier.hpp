@@ -30,7 +30,7 @@ namespace briscola {
 /// The vocabulary and the template histograms are the only state needed at
 /// query time. Both can be saved to disk after training and reloaded at
 /// startup, so the expensive k-means step runs only once.
-class BoVWClassifier {
+class BoWClassifier {
 public:
     /// @brief Trains vocabulary and template histograms from a directory of
     /// reference images named "<rank>-<suit>.JPG" (e.g. "3-spades.JPG").
@@ -82,7 +82,7 @@ public:
     int vocabularySize() const;
 
     /// @brief Number of template histograms currently loaded.
-    std::size_t templateCount() const;
+    std::size_t histogramCount() const;
 
 private:
     cv::Ptr<cv::Feature2D> detector_ = cv::SIFT::create();

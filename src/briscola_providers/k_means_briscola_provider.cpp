@@ -491,7 +491,15 @@ namespace briscola {
                 binaryMask, ccLabels, ccStats, ccCentroids, 8, CV_32S
             );
 
-            //choose biggest blob with min area
+                        // Pick the largest blob above a minimum area.
+            //
+            // The candidate mask is dominated by the card, but still
+            // contains small fragments (leftover checkerboard squares,
+            // specular highlights, print noise). The 0.5% threshold
+            // discards anything too small to be a card; among the rest,
+            // the largest is taken because the card face dominates every
+            // other connected region. Label 0 is OpenCV's background and
+            // is skipped.
             const double minCardAreaRatio = 0.005;
             const int minCardArea = static_cast<int>(minCardAreaRatio * frame.rows * frame.cols);
 
@@ -505,7 +513,10 @@ namespace briscola {
                 }
             }
 
-            // extract the chosen blob
+            // Extract the chosen blob into its own mask (255 on the blob,
+            // 0 elsewhere). If no blob passed the threshold, biggestLabel
+            // stays -1 and the mask stays empty; the rest of the pipeline
+            // is a no-op on an empty mask and findBBox returns nullopt.
             cv::Mat biggestMask(frame.size(), CV_8UC1, cv::Scalar(0));
             if (biggestLabel >= 0) {
                 for (int yy = 0; yy < frame.rows; ++yy) {
@@ -517,7 +528,14 @@ namespace briscola {
                 }
             }
 
-            //closing, only on the chosen blob
+            // Close holes left by the card's printed figures.
+            // K-Means assigns the dark printing (figures, suit symbols,
+            // borders) to other clusters, so the blob is packed with "holes".
+            // If not fixed, extent and solidity drop and
+            // scoreCardBlob rejects a valid card. A 21x21 rectangular
+            // kernel bridges gaps up to ~10 px, enough at the resolutions
+            // seen in the test videos. MORPH_RECT matches the card's
+            // rectangular shape (an ellipse would round the corners).
             if (biggestLabel >= 0) {
                 cv::Mat closeKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(21, 21));
                 cv::morphologyEx(biggestMask, biggestMask, cv::MORPH_CLOSE, closeKernel);
@@ -560,7 +578,10 @@ namespace briscola {
                 filled, componentLabels, stats, centroids, 8, CV_32S
             );
 
-            // 8. scoreCardBlob
+            // Score every blob against the geometric thresholds and keep the
+            // highest-scoring accepted one. Rejected blobs are stored too, so the
+            // debug output can show why each candidate failed. Label 0 is the
+            // background and is skipped.
             for (int label = 1; label < numLabels; ++label) {
                 BlobScore s = scoreCardBlob(
                     filled, componentLabels, stats, label,
@@ -573,15 +594,21 @@ namespace briscola {
                 }
             }
 
-            // cardMask = filled bbox rectangle, 20% bigger.
+            // Compute both bounding boxes of the winning blob: the axis-aligned
+            // one (from stats, used for the debug overlay and as a fallback) and
+            // the rotated one (from minAreaRect on the filled silhouette, used to
+            // align the crop before classification). The rotated rect hugs the
+            // card's actual orientation, while the axis-aligned one is only its
+            // enclosing rectangle. If the blob has no pixels (should not happen
+            // after the fill step), fall back to an
+            // axis-aligned rect at angle 0 so the rest of the code has a valid
+            // RotatedRect to work with.
             if (bestBlobLabel >= 0) {
-                // 1. Bounding box axis-aligned del blob (dalla stats)
-                boundingBox.x = stats.at<int>(bestBlobLabel, cv::CC_STAT_LEFT);
-                boundingBox.y = stats.at<int>(bestBlobLabel, cv::CC_STAT_TOP);
-                boundingBox.width = stats.at<int>(bestBlobLabel, cv::CC_STAT_WIDTH);
+                boundingBox.x      = stats.at<int>(bestBlobLabel, cv::CC_STAT_LEFT);
+                boundingBox.y      = stats.at<int>(bestBlobLabel, cv::CC_STAT_TOP);
+                boundingBox.width  = stats.at<int>(bestBlobLabel, cv::CC_STAT_WIDTH);
                 boundingBox.height = stats.at<int>(bestBlobLabel, cv::CC_STAT_HEIGHT);
 
-                // 2. Rettangolo ruotato stretto attorno al blob
                 std::vector<cv::Point> blobPoints;
                 cv::findNonZero(filled, blobPoints);
                 if (!blobPoints.empty()) {
@@ -595,23 +622,17 @@ namespace briscola {
                     );
                 }
 
-                // 3. cardMask = rettangolo expanded (per inibizione)
+                // cardMask is the bounding box expanded by 20%, filled solid.
+                // It is used by a possible RoundAnalyzer to inhibit the detected card
+                // before searching for the next one, so a slightly larger area
+                // is preferable to a tight one: it guarantees that the card's
+                // edge pixels are covered even if the detector underestimated
+                // the extent. The expanded rect is also drawn on the frame for
+                // the debug overlay.
                 cv::Rect expanded = expandRect(boundingBox, 1.20, frame.size());
                 cardMask = cv::Mat::zeros(frame.size(), CV_8UC1);
                 cardMask(expanded).setTo(255);
                 cv::rectangle(frame, expanded, cv::Scalar(0, 255, 0), 2);
-            }
-        }
-        for (int y = 0; y < frame.rows; ++y) {
-            for (int x = 0; x < frame.cols; ++x) {
-                const int pixel = y * frame.cols + x;
-                const int label = labels.at<int>(pixel, 0);
-                const bool belongsToTable = isTableCluster[label];
-
-                tableMask.at<uchar>(y, x) = belongsToTable ? 255 : 0;
-                foregroundMask.at<uchar>(y, x) = belongsToTable ? 0 : 255;
-                candidateMask.at<uchar>(y, x) = label == candidateCluster ? 255 : 0;
-                clustered.at<cv::Vec3b>(y, x) = debugColors[label];
             }
         }
         if (debug) {
@@ -641,7 +662,8 @@ namespace briscola {
         result.rotatedRect = bestRotatedRect;
         return result;
     }
-
+    
+    
     //######################### CARD RECOGNITION (KMEANS + BOW) #########################    
     /// @brief Maps a Suit enum value to its lowercase English name, for
     /// display in debug overlays and logs. Inverse of suitFromName().
@@ -655,22 +677,23 @@ namespace briscola {
         return "unknown";
     }
 
-    /// @brief Lazily loads the BoVW classifier from disk on first use.
+    /// @brief Lazily loads the BoW classifier from disk on first use.
     /// Training is done offline by the bow_train binary; at query time we only
     /// load the vocabulary and the template histograms.
-    BoVWClassifier& getBoVWClassifier() {
-        static BoVWClassifier bovw;
+    BoWClassifier& getBoWClassifier() {
+        static BoWClassifier bovw;
         static bool loaded = false;
         if (!loaded) {
             //TODO metterli su una cartella tipo /data
             bovw.load("/tmp/bovw-vocab.yml", "/tmp/bovw-hist.yml");
             loaded = true;
-            std::cout << "BoVW: loaded vocabulary with "
+            std::cout << "BoW: loaded vocabulary with "
                     << bovw.vocabularySize() << " words, "
-                    << bovw.templateCount() << " templates" << std::endl;
+                    << bovw.histogramCount() << " histograms" << std::endl;
         }
         return bovw;
     }
+    //fine findBBox
     //###################### BRISCOLA FINDER ######################
     std::optional<Card> KMeansBriscolaProvider::find(
         const std::vector<std::filesystem::path>& path,
@@ -762,7 +785,7 @@ namespace briscola {
             std::cout << "  Crop after rotation: " << cropped.rows << "x" << cropped.cols << std::endl;
         }
 
-        const std::optional<Card> card = getBoVWClassifier().classify(cropped);
+        const std::optional<Card> card = getBoWClassifier().classify(cropped);
         
         // Debug: pubblica il frame con la bbox STRETTA e il nome della carta sopra.
         // La bbox stretta (bbox->rect) è quella esatta del blob rilevato, non
