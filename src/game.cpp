@@ -20,12 +20,19 @@ GameResult GameRunner::run(
     const auto videos = findRoundVideos(gameFolder);
     std::vector<RoundObservation> observations;
     observations.reserve(videos.size());
-
+    
+    /*temporarily disabilitated to just debug kemeans
     for (std::size_t index = 0; index < videos.size(); ++index) {
         observations.push_back(roundAnalyzer_.analyze(videos[index], debug));
         if (progress) progress(index + 1, videos.size());
     }
-
+    */
+    for (std::size_t index = 0; index < videos.size(); ++index) {
+    observations.emplace_back();
+    if (progress) progress(index + 1, videos.size());
+    }
+    //end temp debug
+    
     GameResult game;
     game.briscola = briscolaProvider_.find(videos, observations, debug);
     game.rounds.reserve(observations.size());

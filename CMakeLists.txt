@@ -12,8 +12,10 @@ add_library(briscola
     src/game.cpp
     src/io.cpp
     src/briscola_providers/most_frequent_briscola_provider.cpp
+    src/briscola_providers/k_means_briscola_provider.cpp
     src/rules.cpp
     src/round_analyzers/yolo_sift_round_analyzer.cpp
+    src/bow_classifier.cpp
 )
 target_include_directories(briscola PUBLIC
     include
@@ -29,6 +31,9 @@ target_link_libraries(evaluate_yolo_sift PRIVATE briscola)
 
 add_executable(analyze_round apps/analyze_round.cpp)
 target_link_libraries(analyze_round PRIVATE briscola)
+
+add_executable(bow_train apps/bow_train.cpp)
+target_link_libraries(bow_train PRIVATE briscola)
 
 include(CTest)
 if(BUILD_TESTING)
