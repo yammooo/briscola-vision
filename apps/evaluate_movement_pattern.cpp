@@ -21,6 +21,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <functional>
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,30 +68,51 @@ static void printMetric(const char* name, const briscola::Metric& m) {
 int main(int argc, char* argv[]) {
     // argc must be: exe + CARD_REFS + pairs (GAME_FOLDER CSV)
     // Minimum: exe CARD_REFS GAME_FOLDER CSV  => argc == 4
-    if (argc < 4 || (argc - 2) % 2 != 0) {
+    if (argc < 4) {
         std::cerr << "Usage: " << argv[0]
-                  << " CARD_REFS GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]\n";
+                  << " CARD_REFS [--bow] GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]\n";
         return 1;
     }
 
     const std::filesystem::path refsPath = argv[1];
+    bool useBow = false;
+    int firstPairIndex = 2;
 
+    while (firstPairIndex < argc) {
+        const std::string option = argv[firstPairIndex];
+        if (option == "--bow") {
+            useBow = true;
+            ++firstPairIndex;
+        } else {
+            break;
+        }
+    }
+
+    if ((argc - firstPairIndex) < 2 || (argc - firstPairIndex) % 2 != 0) {
+        std::cerr << "Usage: " << argv[0]
+                  << " CARD_REFS [--bow] GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]\n";
+        return 1;
+    }
     // Parse (gameFolder, csvPath) pairs
     struct GameEntry {
         std::filesystem::path folder;
         std::filesystem::path csv;
     };
     std::vector<GameEntry> games;
-    for (int i = 2; i < argc; i += 2) {
+    for (int i = firstPairIndex; i < argc; i += 2) {
         games.push_back({ argv[i], argv[i + 1] });
     }
 
     try {
         // Load the 40 card reference images
         const auto references = briscola::readCardReferences(refsPath);
-
-        // Build analyzer and briscola provider (shared across all games)
-        briscola::MovementPatternRoundAnalyzer analyzer(references, /*useOrb=*/false);
+        // useBow selects the recognition backend inside the analyzer:
+        //   false -> the original template-matching classifier (featurePatternMatch)
+        //   true  -> the BoW classifier loaded from models/bow/
+        // The scheduling logic (motion detection, 3-frame selection, crop
+        // extraction) is identical in both modes, which makes the two runs
+        // directly comparable.
+        briscola::MovementPatternRoundAnalyzer analyzer(references, /*useOrb=*/false, useBow);
         briscola::FirstFrameBriscolaProvider   briscolaProvider(refsPath);
         briscola::GameRunner                   runner(analyzer, briscolaProvider);
 
@@ -118,12 +140,18 @@ int main(int argc, char* argv[]) {
             // Run the pipeline
             briscola::GameResult prediction;
             try {
+
+                /*
+                //old version, before BoW integration
                 prediction = runner.run(entry.folder, nullptr,
                     [&](std::size_t done, std::size_t total) {
                         std::cout << "\r  Analyzing round " << done << "/" << total << std::flush;
                     });
                 std::cout << "\r  Analyzed " << prediction.rounds.size()
                           << " rounds.                    \n";
+                */
+                prediction = runner.run(entry.folder, nullptr, std::function<void(std::size_t, std::size_t)>());
+                std::cout << "  Analyzed " << prediction.rounds.size() << " rounds.\n";
             } catch (const std::exception& e) {
                 std::cerr << "  ERROR running analyzer: " << e.what() << "\n";
                 continue;
