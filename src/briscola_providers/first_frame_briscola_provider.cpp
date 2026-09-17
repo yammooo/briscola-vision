@@ -74,10 +74,7 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
     }
 
     cv::Mat mask;
-    cv::Mat homo = cv::findHomography(ptsTpl, ptsFrame, cv::USAC_MAGSAC, 3.0, mask, 2000, 0.995);
-    if (homo.empty()) {
-        homo = cv::findHomography(ptsTpl, ptsFrame, cv::RANSAC, 3.0, mask, 2000, 0.995);
-    }
+    cv::Mat homo = cv::findHomography(ptsTpl, ptsFrame, cv::RANSAC, 3.0, mask);
     if (homo.empty()) return 0;
     double det = homo.at<double>(0,0) * homo.at<double>(1,1) - homo.at<double>(0,1) * homo.at<double>(1,0);
     if (std::abs(det) < 1e-6) return 0;
