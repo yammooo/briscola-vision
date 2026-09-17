@@ -825,18 +825,7 @@ namespace briscola {
                 foundFrame,
                 overlay
             );
-            //SANITY CHECK
-            // test isolato, da aggiungere temporaneamente in main() o in un piccolo tool
-            cv::Mat testImage = cv::imread("data/Briscola_Trentine/4-clubs.JPG", cv::IMREAD_COLOR);
-            const std::optional<Card> result = getBoVWClassifier().classify(testImage);
-            // ti aspetti: result->rank == 4, result->suit == Suit::Clubs, bestDistance vicino a 0
-            std::string testLabel;
-            if (card.has_value()) {
-                testLabel = std::to_string(result->rank) + " " + suitName(result->suit);
-            } else {
-                testLabel = "unknown";
-            }
-            std::cout << "test label:" << testLabel; 
+            
         }
         return card;
     }

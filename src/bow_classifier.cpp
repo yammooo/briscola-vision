@@ -21,10 +21,7 @@ Suit suitFromName(const std::string& suitName) {
     if (suitName == "spades")   return Suit::Spades;
     throw std::runtime_error("Unknown suit name in template filename: " + suitName);
 }
-// =========================================================================
-// Data augmentation helpers
-// =========================================================================
-
+//############################ DATA AUGMENTATION HELPER ############################
 /// @brief Copies the input into a new Mat and paints a black rectangle over
 /// a portion of it, simulating a card partially covered by another card.
 ///
@@ -44,13 +41,13 @@ cv::Mat occludeCard(const cv::Mat& src, int mode) {
 
     cv::Rect cover;
     switch (mode) {
-        case 1: cover = cv::Rect(0, 0, W, H / 2); break;                  // top half
-        case 2: cover = cv::Rect(0, H / 2, W, H - H / 2); break;          // bottom half
-        case 3: cover = cv::Rect(0, 0, W / 2, H); break;                  // left half
-        case 4: cover = cv::Rect(W / 2, 0, W - W / 2, H); break;          // right half
-        case 5: cover = cv::Rect(0, 0, W, H / 3); break;                  // top third
-        case 6: cover = cv::Rect(0, 2 * H / 3, W, H - 2 * H / 3); break;  // bottom third
-        case 7: cover = cv::Rect(W / 4, 0, W / 2, H); break;              // central vertical stripe
+        case 1: cover = cv::Rect(0, 0, W, H / 2); break; // top half
+        case 2: cover = cv::Rect(0, H / 2, W, H - H / 2); break; // bottom half
+        case 3: cover = cv::Rect(0, 0, W / 2, H); break; // left half
+        case 4: cover = cv::Rect(W / 2, 0, W - W / 2, H); break; // right half
+        case 5: cover = cv::Rect(0, 0, W, H / 3); break; // top third
+        case 6: cover = cv::Rect(0, 2 * H / 3, W, H - 2 * H / 3); break; // bottom third
+        case 7: cover = cv::Rect(W / 4, 0, W / 2, H); break; // central vertical stripe
         default: return out;
     }
 
@@ -112,6 +109,7 @@ cv::Mat blurCard(const cv::Mat& src, int ksize) {
     cv::GaussianBlur(src, out, cv::Size(ksize, ksize), 0);
     return out;
 }
+
 /// @brief Simulates the crop that the detector produces when the card is
 /// half-covered by another card. The output has the same aspect ratio as
 /// the original card, but only one half of it contains the card; the other
@@ -183,7 +181,7 @@ std::optional<Card> parseTemplateName(const std::filesystem::path& templatePath)
     return Card{rank, suit};
 }
 
-/// @brief Builds a normalized (L2) K-bin histogram from the assignment of
+/// @brief Builds a normalized K-bin histogram from the assignment of
 /// `descriptors` to `vocabulary` rows. Each descriptor votes for its nearest
 /// vocabulary word.
 cv::Mat buildHistogram(
@@ -195,9 +193,7 @@ cv::Mat buildHistogram(
 
     if (descriptors.empty()) return hist;
 
-    // For each descriptor, find the nearest vocabulary word. BFMatcher with
-    // NORM_L2 is fine for the sizes involved (a few hundred descriptors vs
-    // a few hundred words); FLANN would be faster but is overkill here.
+    // For each descriptor, find the nearest vocabulary word. BFMatcher with L2 norm
     cv::BFMatcher matcher(cv::NORM_L2);
     std::vector<cv::DMatch> matches;
     matcher.match(descriptors, vocabulary, matches);
@@ -211,10 +207,42 @@ cv::Mat buildHistogram(
 }
 
 
-
-// -------------------------------------------------------------------------
-// train
-// -------------------------------------------------------------------------
+//########################### TRAINING ###########################
+/// @brief Builds the BoVW vocabulary and the reference histograms from a
+/// directory of card templates.
+///
+/// The procedure is:
+///   1. For every template in `templatesDir`, generate a set of augmented
+///      variants (occlusions, rotations, illumination changes, scaling,
+///      blur) that simulate the conditions under which the detector will
+///      later observe the card: partial occlusion by another card, variable
+///      lighting, video compression, different distances. Training only on
+///      the original templates makes the vocabulary blind to these real
+///      conditions, and the classifier degrades sharply when the query crop
+///      does not match the pristine template.
+///   2. Extract SIFT descriptors from every variant and accumulate them.
+///   3. Run k-means on the accumulated descriptors to build a vocabulary of
+///      `vocabularySize` visual words. The vocabulary is the quantizer that
+///      maps each descriptor to its nearest word.
+///   4. For every variant, quantize its descriptors against the vocabulary
+///      and store the resulting histogram (plus the card label) as a
+///      reference. At query time, the classifier compares the query
+///      histogram to all reference histograms and returns the label of the
+///      closest one.
+///
+/// The function is expensive (k-means on maxDescriptors = 500 => 1M descriptors) and is meant to
+/// run offline. The result is persisted with save() and reloaded at startup
+/// with load(), so the training cost is paid only once.
+///
+/// @param templatesDir  Directory containing the reference card images,
+///        named "<rank>-<suit>.JPG" (e.g. "3-spades.JPG").
+/// @param vocabularySize  Number of visual words (K) in the vocabulary.
+///        I tested a large range, from 50 to 800. Usually i opted for 200 or 400 for tests.
+/// @param maxDescriptorsPerTemplate  Upper bound on the number of SIFT
+///        descriptors kept per variant. Without this cap, variants with
+///        rich textures (e.g. heavily rotated cards with border replication)
+///        would dominate the k-means clustering and the vocabulary would
+///        be biased toward those variants.
 void BoVWClassifier::train(
     const std::filesystem::path& templatesDir,
     int vocabularySize,
@@ -226,30 +254,75 @@ void BoVWClassifier::train(
             templatesDir.string()
         );
     }
-
+    // Store K so that save(), load() and classify() can use it later.
+    // classify() needs it to size the query histogram consistently with the
+    // reference histograms.
     vocabularySize_ = vocabularySize;
 
-    // 1. Load every template, extract descriptors, collect them.
+    // Accumulators for the k-means step.
+    // allDescriptors is a vector of matrices, one per variant, because
+    // vconcat needs the variants to be stacked in order and the number of
+    // descriptors per variant varies. Concatenating directly into a single
+    // growing matrix would be O(N^2) in the number of variants.
+    // labels runs parallel to allDescriptors: labels[i] is the Card of the
+    // variant whose descriptors are in allDescriptors[i]. At the end, every
+    // reference histogram will inherit the label of its variant.
     std::vector<cv::Mat> allDescriptors;
     std::vector<Card> labels;
 
-    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(templatesDir)) {
+        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(templatesDir)) {
+        // Skip anything that is not a regular file. directory_iterator may
+        // yield subdirectories, symlinks, etc.; we only want files.
         if (!entry.is_regular_file()) continue;
+
+        // The templates are named with the ".JPG" extension (uppercase).
+        // We compare exactly to avoid accidentally picking up files with
+        // other extensions (e.g. .png, .jpeg) that might be present in the
+        // directory for unrelated reasons.
         if (entry.path().extension() != ".JPG") continue;
 
+        // Parse "<rank>-<suit>" from the filename. Files that do not match
+        // the expected pattern are silently skipped: they are not part of
+        // the reference set.
         const std::optional<Card> card = parseTemplateName(entry.path());
         if (!card.has_value()) continue;
 
+        // Load the template as BGR. IMREAD_COLOR forces 3 channels even if
+        // the file is grayscale, so that the color histogram in
+        // buildHistogram() always sees a consistent input.
         cv::Mat image = cv::imread(entry.path().string(), cv::IMREAD_COLOR);
-
         if (image.empty()) continue;
+
+        // Build the list of variants for this card. The original is always
+        // included, then all the augmentations. Every variant inherits the
+        // same Card label, so the final histogram set will contain many
+        // histograms per card, each representing one plausible condition
+        // under which the card might be observed.
         std::vector<cv::Mat> variants;
-        variants.push_back(image);   // always include the original
-        // Occlusion: 7 modes (halves, thirds, stripe)
+        variants.push_back(image);
+
+        // Occlusion: 7 modes. The detector almost always sees the briscola
+        // partially covered by another card, the player's hand, or the deck.
+        // Without occlusion variants, the vocabulary contains only pristine
+        // full-card descriptors, and any query crop that is missing a chunk
+        // of the card will match poorly. The 7 modes cover the most common
+        // occlusion patterns: top half, bottom half, left half, right half,
+        // top third, bottom third, central vertical stripe. The last one
+        // simulates a card laid on top of another card, leaving only the
+        // two side strips visible.
         for (int occ = 1; occ <= 7; ++occ) {
             variants.push_back(occludeCard(image, occ));
         }
-        // Rotation: ±30°, ±15°, +90°, +180°
+
+        // Rotation: ±30°, ±15°, +90°, +180°. SIFT is rotation-invariant in
+        // principle, but the *crop* the detector produces is not: it is
+        // aligned to the rotated bounding box of the blob, which is not
+        // necessarily aligned to the card's natural orientation. Rotating
+        // the template before extracting descriptors exposes the vocabulary
+        // to the orientations that will appear at query time. The set is
+        // deliberately limited to a few angles to avoid exploding the
+        // training set; more angles can be added if the detector shows a
+        // systematic orientation bias.
         for (double angle : {-30.0, -15.0, 15.0, 30.0, 90.0, 180.0}) {
             variants.push_back(rotateCard(image, angle));
         }
@@ -410,9 +483,7 @@ void BoVWClassifier::save(
     }
 }
 
-// -------------------------------------------------------------------------
-// load
-// -------------------------------------------------------------------------
+//################################ LOADER ################################
 void BoVWClassifier::load(
     const std::filesystem::path& vocabularyPath,
     const std::filesystem::path& histogramsPath
@@ -457,17 +528,13 @@ void BoVWClassifier::load(
     }
 }
 
-// -------------------------------------------------------------------------
-// isReady
-// -------------------------------------------------------------------------
+//################################ ISREADY #####################################
 bool BoVWClassifier::isReady() const {
     return !vocabulary_.empty() && !histograms_.empty() &&
            histograms_.size() == labels_.size();
 }
 
-// -------------------------------------------------------------------------
-// classify
-// -------------------------------------------------------------------------
+//################################# CLASSIFIER #################################
 std::optional<Card> BoVWClassifier::classify(
     const cv::Mat& cropped
 ) const {
@@ -486,46 +553,41 @@ std::optional<Card> BoVWClassifier::classify(
     // 2. Build the query histogram.
     const cv::Mat queryHist = buildHistogram(descriptors, vocabulary_, vocabularySize_);
 
-    // 3. Compare with every template histogram, keep the best (smallest chi-square).
-    int bestIndex = -1;
-    double bestDistance = std::numeric_limits<double>::max();
+    // 3. Compare with every template histogram, keep the best AND collect all.
+    std::vector<std::pair<double,int>> allDistances;
+    allDistances.reserve(histograms_.size());
 
     for (std::size_t i = 0; i < histograms_.size(); ++i) {
         const double dist = cv::compareHist(queryHist, histograms_[i], cv::HISTCMP_CHISQR);
-        if (dist < bestDistance) {
-            bestDistance = dist;
-            bestIndex = static_cast<int>(i);
-        }
+        allDistances.push_back({dist, static_cast<int>(i)});
     }
-    //DEBUG
-    //this is needed to understand the right chi square threshold
-    std::vector<std::pair<double,int>> allDistances;
-    for (std::size_t i = 0; i < histograms_.size(); ++i) {
-        double d = cv::compareHist(queryHist, histograms_[i], cv::HISTCMP_CHISQR);
-        allDistances.push_back({d, (int)i});
-    }
+
     std::sort(allDistances.begin(), allDistances.end());
 
-    std::cout << "Top 5 matches:" << std::endl;
-    for (int i = 0; i < 5 && i < (int)allDistances.size(); ++i) {
-        int idx = allDistances[i].second;
-        std::cout << "  idx=" << idx
-                << " rank=" << labels_[idx].rank
-                << " suit=" << (int)labels_[idx].suit
-                << " dist=" << allDistances[i].first << std::endl;
-    }
-    //####
-    if (bestIndex < 0) {
+    if (allDistances.empty()) {
         return std::nullopt;
     }
+
+    const int bestIndex = allDistances[0].second;
+    const double bestDistance = allDistances[0].first;
+
+    // Debug: top 5
+    std::cout << "Top 5 matches:" << std::endl;
+    for (int i = 0; i < 5 && i < static_cast<int>(allDistances.size()); ++i) {
+        const int idx = allDistances[i].second;
+        std::cout << "  idx=" << idx
+                << " rank=" << labels_[idx].rank
+                << " suit=" << static_cast<int>(labels_[idx].suit)
+                << " dist=" << allDistances[i].first << std::endl;
+    }
+
     std::cout << "BoVW classify: bestIndex=" << bestIndex
-          << " bestDistance=" << bestDistance << std::endl;    
+            << " bestDistance=" << bestDistance << std::endl;
+
     return labels_[bestIndex];
 }
 
-// -------------------------------------------------------------------------
-// accessors
-// -------------------------------------------------------------------------
+//######################### HELPERS #########################
 int BoVWClassifier::vocabularySize() const {
     return vocabularySize_;
 }
