@@ -291,7 +291,7 @@ void BoWClassifier::train(
         // under which the card might be observed.
         std::vector<cv::Mat> variants;
         variants.push_back(image);
-
+        variants.push_back(rotateCard(image, 180.0));
         // Occlusion: 7 modes. The detector almost always sees the briscola
         // partially covered by another card, the player's hand, or the deck.
         // Without occlusion variants, the vocabulary contains only pristine
