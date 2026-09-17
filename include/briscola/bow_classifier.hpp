@@ -72,10 +72,12 @@ public:
     /// @brief Classifies a cropped card image.
     ///
     /// @param cropped  BGR image containing a single card.
+    /// @param debug Debug sink
     /// @return The recognized Card, or std::nullopt if the crop had no
     ///         descriptors or the best match exceeded the threshold.
     std::optional<Card> classify(
-        const cv::Mat& cropped
+        const cv::Mat& cropped,
+        DebugSink* debug
     ) const;
 
     /// @brief Number of visual words in the vocabulary (0 if not trained).

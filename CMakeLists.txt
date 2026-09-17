@@ -52,6 +52,9 @@ target_link_libraries(evaluate_movement_pattern PRIVATE briscola)
 add_executable(bow_train apps/bow_train.cpp)
 target_link_libraries(bow_train PRIVATE briscola)
 
+add_executable(briscola_bow apps/briscola_bow.cpp)
+target_link_libraries(briscola_bow PRIVATE briscola)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(briscola_tests tests/most_frequent_briscola_provider_test.cpp)

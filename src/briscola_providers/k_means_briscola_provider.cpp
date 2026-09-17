@@ -50,14 +50,14 @@ namespace briscola {
     /// struct, so the debug path and the processing path stay decoupled: if debug
     /// is null the struct is never constructed.
     struct KMeansDebugData {
-        const cv::Mat& frame; ///< Original unmodified frame, visual reference.
-        const cv::Mat& binaryRaw; ///< Binary mask of the candidate cluster straight out of K-Means.
-        const cv::Mat& cardMask; ///< Final binary mask after morphological closing and contour fill.
-        const std::vector<BlobScore>& blobScores; ///< One entry per blob evaluated by scoreCardBlob, including rejected ones.
-        int bestBlobLabel; ///< Label of the winning blob, or -1 if no blob passed the thresholds.
+        const cv::Mat& frame; /// Original unmodified frame, visual reference.
+        const cv::Mat& binaryRaw; /// Binary mask of the candidate cluster straight out of K-Means.
+        const cv::Mat& cardMask; /// Final binary mask after morphological closing and contour fill.
+        const std::vector<BlobScore>& blobScores; /// One entry per blob evaluated by scoreCardBlob, including rejected ones.
+        int bestBlobLabel; /// Label of the winning blob, or -1 if no blob passed the thresholds.
         double bestBlobScore; ///< Geometric score of the winning blob, in [0, 1].
-        std::filesystem::path roundPath; ///< Path of the video file for this round
-        cv::Rect boundingBox; ///<  bounding box of the detected card in image coordinates. (0,0,0,0) if no BBox
+        std::filesystem::path roundPath; /// Path of the video file for this round
+        cv::Rect boundingBox; ///  bounding box of the detected card in image coordinates. (0,0,0,0) if no BBox
     };
 
     /// @brief Score a single blob against a set of geometric thresholds and decide
@@ -71,7 +71,6 @@ namespace briscola {
     /// causes false negatives that are hard to diagnose, while false positives are
     /// caught downstream by taking only the single highest-scoring accepted blob.
     ///
-    /// @param mask Binary mask (CV_8UC1, 0/255) from which the blob was extracted. Used only to scope the pixel scan to the blob's bounding box.
     /// @param componentLabels Label map returned by connectedComponentsWithStats. Needed to identify which pixels belong to this specific blob.
     /// @param stats Stats matrix (N x 5, CV_32S) returned by connectedComponentsWithStats. Provides x, y, w, h, area without iterating the whole image.
     /// @param label Index of the blob to evaluate, in [1, numLabels-1]. Label 0 is the background and must never be passed here.
@@ -85,7 +84,6 @@ namespace briscola {
     /// @param minRectangularity Minimum area/minAreaRect-area ratio. 0.50 allows for moderate rotation and partial occlusion without rejecting a valid card.
     /// @return A BlobScore with accepted=true and a score in (0,1] if all tests pass, or accepted=false and score=0 on the first failing gate.
     BlobScore scoreCardBlob(
-        const cv::Mat& mask,
         const cv::Mat& componentLabels,
         const cv::Mat& stats,
         int label,
@@ -366,7 +364,9 @@ namespace briscola {
             cv::KMEANS_PP_CENTERS,                    // robust k-means++ seeding
             centers                                   // output: K x 3, CV_32F
         );
-
+        if(debug){
+            std::cout << "kmeans compactness: " << compactness << std::endl;
+        }
         // Count the pixels assigned to each cluster.
         std::vector<int> clusterPixelCounts(clusterCount, 0);
         for (int pixel = 0; pixel < labels.rows; ++pixel) {
@@ -427,13 +427,6 @@ namespace briscola {
             }
         }
 
-        const std::array<cv::Vec3b, 5> debugColors = {
-            cv::Vec3b(0, 0, 255),     // red
-            cv::Vec3b(0, 255, 0),     // green
-            cv::Vec3b(255, 0, 0),     // blue
-            cv::Vec3b(0, 255, 255),   // yellow
-            cv::Vec3b(255, 0, 255)    // magenta
-        };
         cv::Mat clustered(frame.size(), CV_8UC3);
         cv::Mat cardMask(frame.size(), CV_8UC1, cv::Scalar(0));
         // valuta ogni blob (label 0 = sfondo, si salta)
@@ -584,7 +577,9 @@ namespace briscola {
             // background and is skipped.
             for (int label = 1; label < numLabels; ++label) {
                 BlobScore s = scoreCardBlob(
-                    filled, componentLabels, stats, label,
+                    componentLabels,
+                    stats,
+                    label,
                     frame.rows * frame.cols
                 );
                 blobScores.push_back(s);
@@ -673,16 +668,16 @@ namespace briscola {
     /// Training is done offline by the bow_train binary; at query time we only
     /// load the vocabulary and the template histograms.
     BoWClassifier& getBoWClassifier() {
-        static BoWClassifier bovw;
+        static BoWClassifier bow;
         static bool loaded = false;
         if (!loaded) {
-            bovw.load("models/bovw/vocab.yml", "models/bovw/hist.yml");
+            bow.load("models/bow/vocab.yml", "models/bow/hist.yml");
             loaded = true;
             std::cout << "BoW: loaded vocabulary with "
-                    << bovw.vocabularySize() << " words, "
-                    << bovw.histogramCount() << " histograms" << std::endl;
+                    << bow.vocabularySize() << " words, "
+                    << bow.histogramCount() << " histograms" << std::endl;
         }
-        return bovw;
+        return bow;
     }
     
     //###################### BRISCOLA FINDER ######################
@@ -762,7 +757,7 @@ namespace briscola {
         // already axis-aligned (the rotation above brought the card vertical),
         // so it can be fed to BoVW without further preprocessing.
         cv::Mat cropped = rotatedFrame(axisAligned).clone();
-        const std::optional<Card> card = getBoWClassifier().classify(cropped);
+        const std::optional<Card> card = getBoWClassifier().classify(cropped, debug);
 
         // Debug: log the rotated rect (for verifying the rotation) and publish
         // an overlay with the rotated rect drawn on the frame and the

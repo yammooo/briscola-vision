@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: " << argv[0]
         << " <templatesDir> <vocabularyOut> <histogramsOut> [K]\n"
         << "Example: " << argv[0]
-        << " data/Briscola_Trentine models/bovw/vocab.yml models/bovw/hist.yml 800\n";
+        << " data/Briscola_Trentine models/bow/vocab.yml models/bow/hist.yml 800\n";
         return 1;
     }
 

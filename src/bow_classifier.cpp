@@ -832,7 +832,8 @@ bool BoWClassifier::isReady() const {
 ///         std::nullopt if the classifier is not ready or the crop yields
 ///         no descriptors.
 std::optional<Card> BoWClassifier::classify(
-    const cv::Mat& cropped
+    const cv::Mat& cropped,
+    DebugSink* debug
 ) const {
     // Fail-safe early exits. Both conditions return nullopt rather than
     // throwing: classify() is called in a loop over candidate frames, and
@@ -922,24 +923,26 @@ std::optional<Card> BoWClassifier::classify(
     // unconditionally (not gated on a debug flag) because classify() is
     // called a handful of times per video and the output is short. If the
     // call frequency increases, gate this on a member flag or a DebugSink
-    // to avoid flooding the console.(NEED TO IMPLEMENT ASAP)
+    // to avoid flooding the console.
     // The label is printed with the numeric suit value, not the string
     // name, because classify() does not know about the name mapping
     // (suitName() lives in a different translation unit). A future
     // refactor could move suitName() to a shared header and print the
     // human-readable name here.
-    std::cout << "Top 5 matches:" << std::endl;
-    for (int i = 0; i < 5 && i < static_cast<int>(allDistances.size()); ++i) {
-        const int idx = allDistances[i].second;
-        std::cout << "  idx=" << idx
-                << " rank=" << labels_[idx].rank
-                << " suit=" << static_cast<int>(labels_[idx].suit)
-                << " dist=" << allDistances[i].first << std::endl;
+    
+    if(debug){
+        std::cout << "Top 5 matches:" << std::endl;
+        for (int i = 0; i < 5 && i < static_cast<int>(allDistances.size()); ++i) {
+            const int idx = allDistances[i].second;
+            std::cout << "  idx=" << idx
+                    << " rank=" << labels_[idx].rank
+                    << " suit=" << static_cast<int>(labels_[idx].suit)
+                    << " dist=" << allDistances[i].first << std::endl;
+        }
+
+        std::cout << "BoW classify: bestIndex=" << bestIndex
+                << " bestDistance=" << bestDistance << std::endl;
     }
-
-    std::cout << "BoW classify: bestIndex=" << bestIndex
-            << " bestDistance=" << bestDistance << std::endl;
-
     // Return the label of the best reference. The caller is responsible
     // for deciding whether the match is confident enough to use: classify()
     // commits to an answer whenever it can produce one, and the caller
