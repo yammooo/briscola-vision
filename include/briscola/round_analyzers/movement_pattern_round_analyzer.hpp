@@ -18,7 +18,8 @@ class MovementPatternRoundAnalyzer final : public IRoundAnalyzer {
 public:
     explicit MovementPatternRoundAnalyzer(
         const std::vector<CardReference>& references,
-        bool useOrb = false
+        bool useOrb = false,
+        bool useBow = false
     );
 
     RoundObservation analyze(
@@ -30,6 +31,7 @@ private:
     SiftCardClassifier classifier_;
     std::vector<CardReference> references_;
     bool useOrb_ = false;
+    bool useBow_ = false;
 };
 
 } // namespace briscola

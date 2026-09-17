@@ -1,6 +1,7 @@
 #include "briscola/round_analyzers/movement_pattern_round_analyzer.hpp"
 
 #include "briscola/debug.hpp"
+#include "briscola/bow_classifier.hpp"
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -571,8 +572,9 @@ cv::Mat renderSignalPlot(
 
 MovementPatternRoundAnalyzer::MovementPatternRoundAnalyzer(
     const std::vector<CardReference>& references,
-    bool useOrb
-) : classifier_(references, useOrb), references_(references), useOrb_(useOrb) {}
+    bool useOrb,
+    bool useBow
+) : classifier_(references, useOrb), references_(references), useOrb_(useOrb), useBow_(useBow) {}
 
 RoundObservation MovementPatternRoundAnalyzer::analyze(
     const std::filesystem::path& video,
@@ -700,9 +702,24 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
 
     // Feature-based card classification using ORB descriptors and brute-force matching. We compare the extracted card crops against the preprocessed reference cards to predict which card was played.
 
-    std::optional<CardPrediction> firstPred  = featurePatternMatch(resized_first_card,  processed_references, orb);
-    std::optional<CardPrediction> secondPred = featurePatternMatch(resized_second_card, processed_references, orb);
-    
+    std::optional<CardPrediction> firstPred;
+    std::optional<CardPrediction> secondPred;
+
+    if (useBow_) {
+        std::optional<Card> firstCard  = getBoWClassifier().classify(resized_first_card, debug);
+        std::optional<Card> secondCard = getBoWClassifier().classify(resized_second_card, debug);
+
+        if (firstCard.has_value()) {
+            firstPred = CardPrediction{*firstCard, 1.0f};
+        }
+        if (secondCard.has_value()) {
+            secondPred = CardPrediction{*secondCard, 1.0f};
+        }
+    } else {
+        firstPred  = featurePatternMatch(resized_first_card,  processed_references, orb);
+        secondPred = featurePatternMatch(resized_second_card, processed_references, orb);
+    }
+
     RoundObservation obs;
     obs.leader = leader;
     if (leader) {

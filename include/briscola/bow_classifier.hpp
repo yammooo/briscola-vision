@@ -94,6 +94,7 @@ private:
     std::vector<Card> labels_;              ///< Card identity for each histogram.
     int vocabularySize_ = 0;
 };
-
+/// @brief Returns the lazily-loaded singleton BoVW classifier.
+BoWClassifier& getBoWClassifier();
 } // namespace briscola
 #endif

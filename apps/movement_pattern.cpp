@@ -9,7 +9,7 @@
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " CARD_REFERENCES ROUND_VIDEO [--debug-window] [--debug-dir DIRECTORY] [--debug-text] [--orb]\n";
+        std::cerr << "Usage: " << argv[0] << " CARD_REFERENCES ROUND_VIDEO [--debug-window] [--debug-dir DIRECTORY] [--debug-text] [--orb] [--bow]\n";
         return 1;
     }
 
@@ -17,6 +17,7 @@ int main(int argc, char* argv[]) {
         bool showWindow = false;
         bool showText = false;
         bool useOrb = false;
+        bool useBow = false;
         std::filesystem::path debugDirectory;
         for (int index = 3; index < argc; ++index) {
             const std::string option = argv[index];
@@ -26,6 +27,8 @@ int main(int argc, char* argv[]) {
                 showText = true;
             } else if (option == "--orb") {
                 useOrb = true;
+            } else if (option == "--bow") {
+                useBow = true;
             } else if (option == "--debug-dir" && ++index < argc) {
                 debugDirectory = argv[index];
             } else {
@@ -34,7 +37,7 @@ int main(int argc, char* argv[]) {
         }
 
         const auto references = briscola::readCardReferences(argv[1]);
-        briscola::MovementPatternRoundAnalyzer analyzer(references, useOrb);
+        briscola::MovementPatternRoundAnalyzer analyzer(references, useOrb, useBow);
         briscola::DebugSink debug(debugDirectory, !debugDirectory.empty(), showWindow);
         const auto observation = analyzer.analyze(
             argv[2],

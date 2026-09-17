@@ -983,4 +983,19 @@ int BoWClassifier::vocabularySize() const {
 std::size_t BoWClassifier::histogramCount() const {
     return histograms_.size();
 }
+/// @brief Lazily loads the BoW classifier from disk on first use.
+/// Training is done offline by the bow_train binary; at query time we only
+/// load the vocabulary and the template histograms.
+BoWClassifier& getBoWClassifier() {
+    static BoWClassifier bow;
+    static bool loaded = false;
+    if (!loaded) {
+        bow.load("models/bow/vocab.yml", "models/bow/hist.yml");
+        loaded = true;
+        std::cout << "BoW: loaded vocabulary with "
+                << bow.vocabularySize() << " words, "
+                << bow.histogramCount() << " histograms" << std::endl;
+    }
+    return bow;
+}
 } // namespace briscola
