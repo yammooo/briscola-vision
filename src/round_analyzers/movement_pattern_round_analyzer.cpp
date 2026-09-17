@@ -35,12 +35,7 @@ struct PatternResult {
     bool success = false;
 };
 
-struct CardFeatureReference {
-    Card card; // Copy the card identity
-    std::vector<cv::KeyPoint> keypoints;
-    cv::Mat descriptors;
-};
-
+// EFFICIENCY IMPROVEMENT
 std::vector<CardFeatureReference> preprocessReferences(
     const std::vector<CardReference>& raw_references,
     cv::Ptr<cv::ORB>& orb
@@ -122,8 +117,8 @@ std::optional<CardPrediction> featurePatternMatch(
         }
     }
 
-    // Require at least 10 good matches to confidently predict a card
-    if (!best_card.has_value() || best_match_count < 10) return std::nullopt;
+    // EFFICIENCY IMPROVEMENT
+    if (!best_card.has_value() || best_match_count < 6) return std::nullopt;
 
     return CardPrediction{ *best_card, static_cast<float>(best_match_count) };
 }
@@ -354,6 +349,14 @@ PatternResult findPattern(const std::vector<double>& signal) {
                (signal[i] < signal[i - 1] && signal[i] <= signal[i + 1]);
     };
 
+    // EFFICIENCY IMPROVEMENT
+    double maxSignal = 0.0;
+    for (double v : signal) {
+        if (v > maxSignal) maxSignal = v;
+    }
+    double peak1Thresh = std::min(12000.0, std::max(6000.0, 0.20 * maxSignal));
+    double peak2Thresh = std::min(8000.0, std::max(4000.0, 0.15 * maxSignal));
+
     // =========================================================================
     // WAVE 1: strictly sequential  P1a  ->  valley  ->  P1b  ->  near-0
     // =========================================================================
@@ -361,7 +364,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // find P1a (first peak)
     int p1a = -1;
     for (int i = 2; i < n - 10; ++i) {
-        if (isProminentPeak(i, 12000.0)) { p1a = i; break; }
+        if (isProminentPeak(i, peak1Thresh)) { p1a = i; break; }
     }
     if (p1a == -1) return res;
     res.p1a = p1a;
@@ -377,7 +380,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // find P1b after valley (second peak after the first valley)
     if (l1a != -1) {
         for (int i = l1a + 1; i < std::min(n - 4, l1a + 35); ++i) {  //25?
-            if (isProminentPeak(i, 8000.0)) {
+            if (isProminentPeak(i, peak2Thresh)) {
                 res.p1b = i;
                 wave1_last_peak = i;
                 break;
@@ -412,7 +415,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // find P2a (first peak of wave 2, after part1)
     int p2a = -1;
     for (int i = res.part1_idx + 1; i < n - 5; ++i) {
-        if (isProminentPeak(i, 12000.0)) { p2a = i; break; }
+        if (isProminentPeak(i, peak1Thresh)) { p2a = i; break; }
     }
     if (p2a == -1) return res;
     res.p2a = p2a;
@@ -428,7 +431,7 @@ PatternResult findPattern(const std::vector<double>& signal) {
     // find P2b after valley (second peak after the second valley)
     if (l2a != -1) {
         for (int i = l2a + 1; i < std::min(n - 4, l2a + 45); ++i) {  //25?
-            if (isProminentPeak(i, 8000.0)) {
+            if (isProminentPeak(i, peak2Thresh)) {
                 res.p2b = i;
                 wave2_last_peak = i;
                 break;
@@ -569,10 +572,14 @@ cv::Mat renderSignalPlot(
 
 
 
+// EFFICIENCY IMPROVEMENT
 MovementPatternRoundAnalyzer::MovementPatternRoundAnalyzer(
     const std::vector<CardReference>& references,
     bool useOrb
-) : classifier_(references, useOrb), references_(references), useOrb_(useOrb) {}
+) : classifier_(references, useOrb), references_(references), useOrb_(useOrb) {
+    orb_ = cv::ORB::create(1000);
+    processed_references_ = preprocessReferences(references_, orb_);
+}
 
 RoundObservation MovementPatternRoundAnalyzer::analyze(
     const std::filesystem::path& video,
@@ -604,12 +611,6 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::Mat prevGray;
     cv::cvtColor(allFrames[0], prevGray, cv::COLOR_BGR2GRAY);
     cv::GaussianBlur(prevGray, prevGray, cv::Size(blurSize, blurSize), 0);
-
-    // Preprocess reference cards to extract features using ORB
-
-    std::vector<CardReference> raw_references = references_;
-    cv::Ptr<cv::ORB> orb = cv::ORB::create(1000);
-    std::vector<CardFeatureReference> processed_references = preprocessReferences(raw_references, orb);
 
     for (int i = 1; i < n; ++i) {
 
@@ -698,10 +699,9 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::Mat resized_first_card = extractAndNormalizeCard(first_card, debug, s1 );
     cv::Mat resized_second_card = extractAndNormalizeCard(second_card, debug, s2 );
 
-    // Feature-based card classification using ORB descriptors and brute-force matching. We compare the extracted card crops against the preprocessed reference cards to predict which card was played.
-
-    std::optional<CardPrediction> firstPred  = featurePatternMatch(resized_first_card,  processed_references, orb);
-    std::optional<CardPrediction> secondPred = featurePatternMatch(resized_second_card, processed_references, orb);
+    // EFFICIENCY IMPROVEMENT
+    std::optional<CardPrediction> firstPred  = featurePatternMatch(resized_first_card,  processed_references_, orb_);
+    std::optional<CardPrediction> secondPred = featurePatternMatch(resized_second_card, processed_references_, orb_);
     
     RoundObservation obs;
     obs.leader = leader;

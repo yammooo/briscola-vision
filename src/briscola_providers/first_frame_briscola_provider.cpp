@@ -80,10 +80,12 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
         ptsFrame.push_back(frameKpts[dmatch.trainIdx].pt);
     }
 
-    // Use RANSAC to find a homography and count inliers 
-
+    // EFFICIENCY IMPROVEMENT
     cv::Mat mask;
-    cv::Mat homo = cv::findHomography(ptsTpl, ptsFrame, cv::RANSAC, 3.0, mask);
+    cv::Mat homo = cv::findHomography(ptsTpl, ptsFrame, cv::USAC_MAGSAC, 3.0, mask, 2000, 0.995);
+    if (homo.empty()) {
+        homo = cv::findHomography(ptsTpl, ptsFrame, cv::RANSAC, 3.0, mask, 2000, 0.995);
+    }
     if (homo.empty()) return 0;
     int inliers = 0;
     for (int i = 0; i < mask.rows; ++i) if (mask.at<uchar>(i)) ++inliers;

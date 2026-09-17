@@ -13,6 +13,13 @@
 
 namespace briscola {
 
+// EFFICIENCY IMPROVEMENT
+struct CardFeatureReference {
+    Card card;
+    std::vector<cv::KeyPoint> keypoints;
+    cv::Mat descriptors;
+};
+
 /** @brief Motion / temporal-difference based round analyzer. */
 class MovementPatternRoundAnalyzer final : public IRoundAnalyzer {
 public:
@@ -30,6 +37,10 @@ private:
     SiftCardClassifier classifier_;
     std::vector<CardReference> references_;
     bool useOrb_ = false;
+
+    // EFFICIENCY IMPROVEMENT
+    cv::Ptr<cv::ORB> orb_;
+    std::vector<CardFeatureReference> processed_references_;
 };
 
 } // namespace briscola
