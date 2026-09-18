@@ -96,7 +96,11 @@ private:
     int vocabularySize_ = 0;
     
 };
-/// @brief Returns the lazily-loaded singleton BoVW classifier.
+/// @brief Returns the lazily-loaded singleton BoW classifier.
 BoWClassifier& getBoWClassifier();
+/// @brief Parses a template filename stem "<rank>-<suit>" into a Card.
+/// @return std::nullopt if the stem does not match the expected format.
+std::optional<Card> parseTemplateName(const std::filesystem::path& templatePath);
+
 } // namespace briscola
 #endif

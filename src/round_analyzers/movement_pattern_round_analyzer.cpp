@@ -563,14 +563,6 @@ cv::Mat renderSignalPlot(
 } // anonymous namespace
 
 
-
-
-
-
-
-
-
-
 MovementPatternRoundAnalyzer::MovementPatternRoundAnalyzer(
     const std::vector<CardReference>& references,
     bool useOrb,
