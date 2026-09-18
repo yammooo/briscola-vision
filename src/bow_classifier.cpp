@@ -60,7 +60,7 @@ cv::Mat scaleCard(const cv::Mat& src, double scale) {
     return out;
 }
 
-/// @brief Applies a light Gaussian blur, simulating video compression.
+/// @brief Applies a light Gaussian blur.
 cv::Mat blurCard(const cv::Mat& src, int ksize) {
     cv::Mat out;
     if (ksize % 2 == 0) ksize++;
@@ -70,9 +70,7 @@ cv::Mat blurCard(const cv::Mat& src, int ksize) {
 
 /// @brief Simulates the crop that the detector produces when the card is
 /// half-covered by another card. The output contains only the visible
-/// portion of the card, with the same geometry the detector produces at
-/// query time: a H/2 × W (or W/2 × H) crop that ends at the occlusion
-/// boundary, with no covered area included.
+/// portion of the card.
 ///
 /// @param src    Input card image (BGR), assumed to be the full card.
 /// @param mode   1 = top half visible, bottom half covered
@@ -226,7 +224,7 @@ void BoWClassifier::train(
     std::vector<cv::Mat> allDescriptors;
     std::vector<Card> labels;
 
-        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(templatesDir)) {
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(templatesDir)) {
         // Skip anything that is not a regular file. directory_iterator may
         // yield subdirectories, symlinks, etc.; we only want files.
         if (!entry.is_regular_file()) continue;
@@ -317,14 +315,12 @@ void BoWClassifier::train(
         variants.push_back(cropHalfWithContext(image, 5));  // top 2/3 visible
         variants.push_back(cropHalfWithContext(image, 6));  // bottom 2/3 visible
         
-        // Random occlusions: 15 variants with a black rectangle of random
-        // position and size. The systematic occlusions above always cover
+        // Random occlusions: 15 variants of random card
+        // position and size. The systematic card crops above always cover
         // the same regions (half, third, stripe) and produce, for every
-        // card, variants that share the same covered area. That is
-        // unrealistic: in the real video the occluding object covers an
-        // arbitrary region. Random rectangles explore a much larger
-        // portion of the occlusion space with only 15 extra variants.
-        //
+        // card, variants that share the same covered area.
+        // Random rectangles explore a much larger
+        // portion of card with only 15 extra variants.
         // The RNG is seeded with a fixed value (42) so that two runs of
         // train() with the same inputs produce the same variants. This
         // makes the training reproducible: the vocabulary, and therefore
