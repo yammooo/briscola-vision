@@ -14,6 +14,7 @@ int main() {
 
     MostFrequentBriscolaProvider provider;
     const auto result = provider.find({}, rounds);
+    (void)result;
 
     assert(result);
     assert(result->rank == 1);
@@ -43,6 +44,7 @@ int main() {
 
     RoundTemporalAggregator aggregator;
     const RoundObservation observation = aggregator.aggregate(detections);
+    (void)observation;
     assert(observation.northCard);
     assert(observation.northCard->card.rank == north.rank);
     assert(observation.southCard);

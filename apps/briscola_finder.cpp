@@ -44,8 +44,7 @@ int main(int argc, char** argv) {
     }
 
     std::sort(files.begin(), files.end());
-    // Use only the first video
-    std::vector<std::filesystem::path> videos = { files.front() };
+    std::vector<std::filesystem::path> videos = files;
 
     FirstFrameBriscolaProvider provider(ref);
     auto result = provider.find(videos, {} , nullptr);

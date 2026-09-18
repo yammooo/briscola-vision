@@ -6,6 +6,7 @@
 #include <iostream>
 
 int main(int argc, char* argv[]) {
+    (void)argc;
     assert(argc == 3);
 
     briscola::YoloCardDetector detector(argv[1], 0.40F);

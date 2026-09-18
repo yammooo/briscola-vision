@@ -1,4 +1,5 @@
 #include "briscola/briscola_providers/first_frame_briscola_provider.hpp"
+#include "briscola/timing_profile.hpp"
 
 #include <opencv2/core.hpp>
 #include <opencv2/features2d.hpp>
@@ -46,8 +47,7 @@ static void extractSIFT(const cv::Ptr<cv::SIFT>& sift, const cv::Mat& img, std::
     sift->detectAndCompute(img, {}, kpts, desc);
 }
 
-// Match one template against the frame descriptors and return RANSAC inlier count
-// We need to be very torough here, because the template may be very small and the frame may have many features. We use Lowe's ratio test and RANSAC to filter out bad matches.
+// EFFICIENCY IMPROVED
 static int countInliersForTemplate(cv::BFMatcher& matcher,
     const std::vector<cv::KeyPoint>& tplKpts,
     const cv::Mat& tplDesc,
@@ -57,11 +57,7 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
     if (tplDesc.empty() || frameDesc.empty()) return 0;
     std::vector<std::vector<cv::DMatch>> knn;
 
-    // Perform KNN matching with k=2 for Lowe's ratio test, to find good matches between the template and the frame
-
     try { matcher.knnMatch(tplDesc, frameDesc, knn, 2); } catch (...) { return 0; }
-
-    // Find good matches using Lowe's ratio test
 
     std::vector<cv::DMatch> good;
     const float ratio = 0.75f;
@@ -71,8 +67,6 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
     }
     if (good.size() < 4) return 0;
 
-    // Extract the matched keypoints from the template and the frame
-
     std::vector<cv::Point2f> ptsTpl, ptsFrame;
     ptsTpl.reserve(good.size()); ptsFrame.reserve(good.size());
     for (const auto& dmatch : good) {
@@ -80,11 +74,12 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
         ptsFrame.push_back(frameKpts[dmatch.trainIdx].pt);
     }
 
-    // Use RANSAC to find a homography and count inliers 
-
     cv::Mat mask;
     cv::Mat homo = cv::findHomography(ptsTpl, ptsFrame, cv::RANSAC, 3.0, mask);
     if (homo.empty()) return 0;
+    double det = homo.at<double>(0,0) * homo.at<double>(1,1) - homo.at<double>(0,1) * homo.at<double>(1,0);
+    if (std::abs(det) < 1e-6) return 0;
+
     int inliers = 0;
     for (int i = 0; i < mask.rows; ++i) if (mask.at<uchar>(i)) ++inliers;
     return inliers;
@@ -94,7 +89,6 @@ static int countInliersForTemplate(cv::BFMatcher& matcher,
 
 FirstFrameBriscolaProvider::FirstFrameBriscolaProvider()
 {
-    // Default reference folder (assumed present): data/Briscola_Trentine
     referenceFolder_ = std::filesystem::path("data") / "Briscola_Trentine";
 }
 
@@ -115,8 +109,8 @@ void FirstFrameBriscolaProvider::ensureTemplatesLoaded() {
 
 void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::path& folder) {
 
-    // Create SIFT detector to find features in the templates
-    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
+    // EFFICIENCY IMPROVED
+    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create(0, 3, 0.03, 10, 1.6);
 
     std::vector<std::filesystem::path> files;
     for (const auto& entry : std::filesystem::directory_iterator(folder)) {
@@ -126,8 +120,6 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
     std::sort(files.begin(), files.end());
 
     for (const auto& path : files) {
-
-        // look at all the templates in the folder, and parse the rank and suit from the filename
 
         const std::string stem = path.stem().string();
         const auto dash = stem.find('-');
@@ -141,15 +133,11 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
         cv::Mat gray;
         cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
 
-        // Extract SIFT features from the template
-
         std::vector<cv::KeyPoint> kpts;
         cv::Mat desc;
         sift->detectAndCompute(gray, {}, kpts, desc);
 
         if (desc.empty()) continue;
-
-        // Store the template. It contains the card identity, keypoints, and descriptors.
 
         CardTemplate tpl;
         tpl.card = Card{rank, suit};
@@ -159,58 +147,132 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
     }
 }
 
+//EFFICIENCY IMPROVEMENTS
 std::optional<Card> FirstFrameBriscolaProvider::find(
     const std::vector<std::filesystem::path>& videos,
     const std::vector<RoundObservation>&,
     DebugSink* debug
 ) {
-    // calculate SIFT features for the templates, then for the first frame of the first round, and match them to find the best candidate for briscola
     ensureTemplatesLoaded();
     if (templates_.empty()) return std::nullopt;
 
-    //we look for the first frame of the first round. 
-    std::filesystem::path target;
+    auto t_frame_start = std::chrono::steady_clock::now();
+    std::filesystem::path path1, path17, path20;
     for (const auto& p : videos) {
         const std::string fname = p.filename().string();
-        if (fname.find("round1.mp4") != std::string::npos) { target = p; break; }
+        if (fname.find("round1.mp4") != std::string::npos) path1 = p;
+        else if (fname.find("round17.mp4") != std::string::npos) path17 = p;
+        else if (fname.find("round20.mp4") != std::string::npos) path20 = p;
     }
-    if (target.empty() && !videos.empty()) target = videos.front();
-    if (target.empty()) return std::nullopt;
+    if (path1.empty() && !videos.empty()) path1 = videos.front();
+    if (path1.empty()) return std::nullopt;
 
-    // Extract SIFT features from the first frame
-        const cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
-        cv::BFMatcher matcher(cv::NORM_L2);
-    
-        auto maybeFrame = openFirstFrame(target);
-        if (!maybeFrame) return std::nullopt;
-        cv::Mat frame = *maybeFrame;
+    cv::Rect briscolaRoi;
+    if (!path17.empty() && !path20.empty()) {
+        auto maybeF17 = openFirstFrame(path17);
+        auto maybeF20 = openFirstFrame(path20);
+        if (maybeF17 && maybeF20 && maybeF17->size() == maybeF20->size() && !maybeF17->empty()) {
+            cv::Mat diff, grayDiff, mask;
+            cv::absdiff(*maybeF17, *maybeF20, diff);
+            cv::cvtColor(diff, grayDiff, cv::COLOR_BGR2GRAY);
+            cv::GaussianBlur(grayDiff, grayDiff, cv::Size(15, 15), 0);
+            cv::threshold(grayDiff, mask, 25, 255, cv::THRESH_BINARY);
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(9, 9));
+            cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+            cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
 
-        cv::Mat gray;
-        toGray(frame, gray);
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-        
-        std::vector<cv::KeyPoint> frameKpts;
-        cv::Mat frameDesc;
-        extractSIFT(sift, gray, frameKpts, frameDesc);
-        if (frameDesc.empty() || frameKpts.empty()) return std::nullopt;
+            const int h = mask.rows;
+            const int w = mask.cols;
+            const double minY = h * 0.40;
+            const double maxY = h * 0.65;
 
-        int bestInliers = 0;
-        std::optional<Card> bestCard;
+            double bestArea = -1.0;
+            cv::Point centerPt(w / 2, static_cast<int>(h * 0.52));
+            bool foundBlob = false;
 
-        // Search for the best match in the templates
+            for (const auto& c : contours) {
+                cv::Rect r = cv::boundingRect(c);
+                double cy = r.y + r.height / 2.0;
+                if (cy >= minY && cy <= maxY) {
+                    double area = static_cast<double>(r.width) * r.height;
+                    if (area > bestArea) {
+                        bestArea = area;
+                        centerPt = cv::Point(r.x + r.width / 2, r.y + r.height / 2);
+                        foundBlob = true;
+                    }
+                }
+            }
 
-        for (const auto& tpl : templates_) {
-            const int inliers = countInliersForTemplate(matcher, tpl.keypoints, tpl.descriptors, frameKpts, frameDesc);
-            const int MIN_INLIERS = 10;
-            if (inliers > bestInliers && inliers >= MIN_INLIERS) {
-                bestInliers = inliers;
-                bestCard = tpl.card;
+            if (!foundBlob) {
+                for (const auto& c : contours) {
+                    cv::Rect r = cv::boundingRect(c);
+                    double area = static_cast<double>(r.width) * r.height;
+                    if (area > bestArea) {
+                        bestArea = area;
+                        centerPt = cv::Point(r.x + r.width / 2, r.y + r.height / 2);
+                        foundBlob = true;
+                    }
+                }
+            }
+
+            if (foundBlob) {
+                const int roiSize = 500;
+                int rx = std::max(0, std::min(centerPt.x - roiSize / 2, w - roiSize));
+                int ry = std::max(0, std::min(centerPt.y - roiSize / 2, h - roiSize));
+                int rw = std::min(roiSize, w - rx);
+                int rh = std::min(roiSize, h - ry);
+                briscolaRoi = cv::Rect(rx, ry, rw, rh);
             }
         }
+    }
 
-        if (debug && bestCard) debug->publishText("first-frame", "provider", 0, "Selected briscola candidate");
+    auto maybeFrame = openFirstFrame(path1);
+    if (!maybeFrame) return std::nullopt;
+    cv::Mat frame = *maybeFrame;
 
-        return bestCard;
+    cv::Mat searchImage;
+    if (briscolaRoi.width > 0 && briscolaRoi.height > 0 &&
+        briscolaRoi.x + briscolaRoi.width <= frame.cols &&
+        briscolaRoi.y + briscolaRoi.height <= frame.rows) {
+        searchImage = frame(briscolaRoi);
+    } else {
+        searchImage = frame;
+    }
+
+    cv::Mat gray;
+    toGray(searchImage, gray);
+
+    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create(0, 3, 0.03, 10, 1.6);
+    cv::BFMatcher matcher(cv::NORM_L2);
+
+    std::vector<cv::KeyPoint> frameKpts;
+    cv::Mat frameDesc;
+    extractSIFT(sift, gray, frameKpts, frameDesc);
+    if (frameDesc.empty() || frameKpts.empty()) return std::nullopt;
+    auto t_after_sift = std::chrono::steady_clock::now();
+    getGlobalProfiler().briscolaFrameSiftSec += std::chrono::duration<double>(t_after_sift - t_frame_start).count();
+
+    auto t_match_start = std::chrono::steady_clock::now();
+    int bestInliers = 0;
+    std::optional<Card> bestCard;
+
+    for (const auto& tpl : templates_) {
+        const int inliers = countInliersForTemplate(matcher, tpl.keypoints, tpl.descriptors, frameKpts, frameDesc);
+        const int MIN_INLIERS = 10;
+        if (inliers > bestInliers && inliers >= MIN_INLIERS) {
+            bestInliers = inliers;
+            bestCard = tpl.card;
+        }
+    }
+    auto t_after_match = std::chrono::steady_clock::now();
+    getGlobalProfiler().briscolaMatchingSec += std::chrono::duration<double>(t_after_match - t_match_start).count();
+
+    if (debug && bestCard) debug->publishText("first-frame", "provider", 0, "Selected briscola candidate");
+
+    return bestCard;
 }
 
 } // namespace briscola
