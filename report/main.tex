@@ -142,8 +142,113 @@ goal of this project.
 
 \subsection{Other pipelines}
 
-% Add one subsection per additional group pipeline, following the same order:
-% overview, frame-level method, temporal aggregation, assumptions, limitations.
+\subsection{K-Means and Bag-of-Visual-Words pipeline}
+
+\subsubsection{Overview}
+
+This pipeline explores how far a fully classical, non-neural detector and
+classifier can go on the same task. The goal was not to beat YOLO/local-features
+on accuracy, but to map the boundary of a bag-of-visual-words classifier when
+the card is lying on a checked tablecloth, often partially covered by another
+card. The detector is a K-Means segmentation followed by a geometric filter; the
+classifier is a BoW vocabulary built from SIFT descriptors of the 40 reference
+scans. The pipeline is fully deterministic (k-means is seeded at 42) and
+requires no training data, no GPU, and no learned model.
+
+\subsubsection{Detector: K-Means plus local variance}
+
+The detector has to solve one specific problem: the card face and the light
+squares of the tablecloth have nearly the same colour, so a plain K-Means on
+the raw frame merges them. The pipeline therefore applies, before any
+clustering, a Gaussian blur whose kernel is larger than one checkerboard
+period. When the kernel spans at least one full light/dark cycle, every output
+pixel is an average of several light and dark squares, and the tablecloth
+collapses to a mid-gray while the card face survives almost unchanged.
+
+The blur alone is not enough when the kernel is not perfectly matched to the
+pattern. A local variance map is therefore computed on the blurred grayscale
+frame with two box filters ($\mathrm{Var} = E[I^2] - E[I]^2$). The card face,
+being spatially uniform, has near-zero variance; the residual checkerboard has
+high variance. A threshold on this map produces a \emph{uniform mask} that
+removes the surviving fragments of the tablecloth before connected components
+see them.
+
+K-Means is then run on the blurred colour frame with $K=6$; the five largest
+clusters are taken as the table-colour model, and the brightest foreground
+cluster is taken as the card face. The binary mask of this cluster is
+intersected with the uniform mask, closed with a $21\times21$ rectangular
+kernel to seal the holes left by the printed figures and the suit symbols, and
+its outer contour is flood-filled. Each resulting blob is scored on five
+geometric properties (area, aspect ratio, extent, solidity, rectangularity);
+the highest-scoring accepted blob is taken as the card. Both the axis-aligned
+bounding box and the rotated \texttt{minAreaRect} are returned, together with
+an already axis-aligned card crop and an expanded silhouette that other
+pipelines can use for inhibition.
+
+\subsubsection{Recognition: Bag of Visual Words}
+
+A vocabulary of $K=800$ visual words is built by running k-means over SIFT
+descriptors extracted from the 40 reference cards and their augmented
+variants. Each card is represented by a histogram over the visual words, and
+a query crop is matched to the reference with the smallest chi-square
+distance.
+
+Three choices were made after observing the failure modes of earlier versions.
+
+\textbf{Augmentation geometry.} The first version simulated occlusion by
+painting a black rectangle over a portion of the card. This produced a
+training set whose geometry did not match the real crops: the real crop from
+the detector contains only the visible portion of the card, with no black
+cover. The training set was therefore changed to crop the card to a fraction
+of its area (40\%--90\% visible, centered), which reproduces the actual
+geometry of the detector's output. This change alone raised the played-card
+accuracy from 47.5\% to 60\% on the first game.
+
+\textbf{Vocabulary size.} Several values of $K$ were tested, from 40 to 800.
+Small vocabularies collapsed distinct cards onto the same words; the sweet
+spot on this dataset was $K=800$, where the vocabulary is large enough to
+separate the 40 cards and their variants without overfitting.
+
+\textbf{Colour extension.} An HSV histogram was appended to the BoW histogram,
+on the assumption that colour would help distinguish Clubs from Coins, the two
+suits with the most similar silhouette. The extension was implemented and
+tested, but it degraded the overall accuracy instead of improving it. The
+most likely reason is that by adding a second,
+coarser colour channel drowned the discriminative signal in the noise of the
+tablecloth colours. The colour extension was therefore removed, and the final
+pipeline uses the BoW histogram alone.
+
+\subsubsection{Pipeline integration}
+
+\texttt{KMeansBriscolaProvider::find} scans up to 30 frames per round, calls
+\texttt{findBBox} on each, and on the first successful detection classifies the
+aligned crop. The provider implements \texttt{IBriscolaProvider}, so it can be
+plugged into the existing \texttt{GameRunner} without changes to the rules or
+the I/O.
+
+The same BoW classifier can also replace the built-in template matcher inside
+the movement-pattern analyzer, via the \texttt{--bow} flag. The scheduling
+logic (motion detection, three-frame selection, leader inference) is reused
+unchanged; only the recognition step is swapped. Because the frames selected
+by the movement analyzer contain multiple cards (the briscola and the played
+cards), \texttt{findBBox} is called with an exclusion mask that hides the
+cards already identified, so the largest remaining blob is the card we are
+looking for. The mask is the expanded bounding box returned by the previous
+\texttt{findBBox} call, so no extra geometry is computed.
+
+\subsubsection{Results and limitations}
+
+The briscola card was recovered correctly on all four provided games. The
+played-card classification is around 50\% across the four games.
+
+The failure mode is systematic and intrinsic to the bag-of-words paradigm. A
+card whose visible face shows fewer symbols than the real card (four denari
+visible on a six-coins, five spade tips visible on a four-spades) is
+misclassified toward the visually present rank, because the histogram loses
+the descriptors of the covered symbols and the nearest reference becomes a
+different card that happens to share the visible pattern. SIFT, which matches
+descriptors locally and uses geometric verification, does not suffer from
+this failure mode and is the recommended method when occlusion is expected.
 
 \section{Results and discussion}
 
