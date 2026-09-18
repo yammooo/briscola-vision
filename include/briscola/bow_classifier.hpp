@@ -185,10 +185,14 @@ public:
     ) const;
         
 
-    /// @brief Number of visual words in the vocabulary (0 if not trained).
+    /**
+     * @brief Number of visual words in the vocabulary (0 if not trained).
+     */
     int vocabularySize() const;
 
-    /// @brief Number of template histograms currently loaded.
+    /**
+     * @brief Number of template histograms currently loaded.
+     */
     std::size_t histogramCount() const;
 
 private:
