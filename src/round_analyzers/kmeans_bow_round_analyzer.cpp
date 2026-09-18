@@ -1,7 +1,6 @@
 #include "briscola/round_analyzers/kmeans_bow_round_analyzer.hpp"
 
 #include "briscola/bow_classifier.hpp"
-#include "briscola/briscola_providers/k_means_briscola_provider.hpp"
 #include "briscola/debug.hpp"
 
 #include <opencv2/imgproc.hpp>
@@ -162,6 +161,118 @@ PatternResult findPattern(const std::vector<double>& signal) {
     res.p_pickup = p_pickup;
     res.success = true;
     return res;
+}
+
+cv::Mat extractBestCrop(const cv::Mat& bin, const cv::Mat& src) {
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    if (contours.empty()) return {};
+
+    const double minArea = 1000.0;
+    const cv::Point2f frameCenter(src.cols * 0.5f, src.rows * 0.5f);
+    size_t bestIdx = SIZE_MAX;
+    double bestScore = 0.0;
+
+    for (size_t i = 0; i < contours.size(); ++i) {
+        double a = cv::contourArea(contours[i]);
+        if (a < minArea) continue;
+
+        cv::Rect r = cv::boundingRect(contours[i]);
+        float dx = (r.x + r.width * 0.5f - frameCenter.x) / frameCenter.x;
+        float dy = (r.y + r.height * 0.5f - frameCenter.y) / frameCenter.y;
+        double score = a * std::exp(-2.0 * (dx * dx + dy * dy));
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestIdx = i;
+        }
+    }
+    if (bestIdx == SIZE_MAX) return {};
+
+    cv::Rect r = cv::boundingRect(contours[bestIdx]);
+    int cx = r.x + r.width / 2;
+    int cy = r.y + r.height / 2;
+
+    const int fixedSize = 400;
+    int nx = cx - (fixedSize / 2);
+    int ny = cy - (fixedSize / 2);
+    nx = std::max(0, std::min(nx, src.cols - fixedSize));
+    ny = std::max(0, std::min(ny, src.rows - fixedSize));
+
+    cv::Rect fixedRect(nx, ny, fixedSize, fixedSize);
+    if (fixedRect.width <= 0 || fixedRect.height <= 0 || 
+        fixedRect.x + fixedRect.width > src.cols || 
+        fixedRect.y + fixedRect.height > src.rows) {
+        return {};
+    }
+    return src(fixedRect).clone();
+}
+
+cv::Mat extractAndNormalizeCard(const cv::Mat& target_crop, DebugSink* debug, const std::string& debug_name) {
+    if (target_crop.empty()) return {};
+
+    cv::Mat gray, edges;
+    cv::cvtColor(target_crop, gray, cv::COLOR_BGR2GRAY);
+    cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
+    cv::Canny(gray, edges, 50, 150);
+    cv::dilate(edges, edges, cv::Mat(), cv::Point(-1, -1), 1);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(edges, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);
+
+    cv::Rect bestRect;
+    double bestAreaDiff = 1e9;
+    const double targetArea = 30000.0;
+
+    cv::Mat debug_img;
+    if (debug) {
+        debug_img = target_crop.clone();
+    }
+
+    for (const auto& contour : contours) {
+        double area = cv::contourArea(contour);
+        if (area < 20000 || area > 60000) continue;
+
+        std::vector<cv::Point> approx;
+        double peri = cv::arcLength(contour, true);
+        cv::approxPolyDP(contour, approx, 0.02 * peri, true);
+
+        if (approx.size() == 4 && cv::isContourConvex(approx)){
+            double areaDiff = std::abs(area - targetArea);
+            if (areaDiff < bestAreaDiff) {
+                bestAreaDiff = areaDiff;
+                bestRect = cv::boundingRect(approx);
+            }
+            if (debug) {
+                cv::polylines(debug_img, approx, true, cv::Scalar(0, 255, 0), 2);
+            }
+        }
+    }
+
+    if (bestAreaDiff == 1e9) {
+        cv::Mat blur_gray;
+        cv::GaussianBlur(gray, blur_gray, cv::Size(5, 5), 0);
+        int template_w = 180;
+        int template_h = 300;
+        cv::Mat dummy_card = cv::Mat::ones(cv::Size(template_w, template_h), CV_8UC1) * 255;
+        cv::Mat result;
+        cv::matchTemplate(blur_gray, dummy_card, result, cv::TM_CCORR_NORMED);
+        double minVal, maxVal;
+        cv::Point minLoc, maxLoc;
+        cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc);
+        bestRect = cv::Rect(maxLoc.x, maxLoc.y, template_w, template_h);
+    }
+
+    if (bestRect.area() == 0) {
+        bestRect = cv::Rect(50, 50, 300, 300);
+    }
+
+    cv::Mat final_card = target_crop(bestRect).clone();
+    if (debug) {
+        debug->publishImage("capture", debug_name + "_quads", 0, debug_img, true, false);
+        debug->publishImage("capture", debug_name, 0, final_card, true, false);
+    }
+    return final_card;
 }
 
 cv::Mat renderSignalPlot(
@@ -325,46 +436,46 @@ RoundObservation KMeansBowRoundAnalyzer::analyze(
     cv::Mat frame_part1 = allFrames[pat.part1_idx];
     cv::Mat frame_part2 = allFrames[pat.part2_idx];
 
-    std::optional<CardPrediction> firstPred;
-    std::optional<CardPrediction> secondPred;
-    std::optional<CardPrediction> briscolaPred;
+    // Temporal subtraction to cleanly isolate the played cards without background or briscola clutter
+    cv::Mat first_diff, second_diff;
+    cv::absdiff(frame_part1, first_frame, first_diff);
+    cv::absdiff(frame_part2, frame_part1, second_diff);
 
-    // Find the briscola in the first frame of the round
-    std::optional<CardBBox> briscolaBox = briscola::findBBox({video}, 0, 0, debug);
-    if (briscolaBox.has_value()) {
-        briscolaPred = getBoWClassifier().classify(briscolaBox->image, debug);
+    cv::Mat fgray, sgray;
+    cv::cvtColor(first_diff, fgray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(second_diff, sgray, cv::COLOR_BGR2GRAY);
+
+    cv::Mat fmask, smask;
+    const int binThresh = 30;
+    cv::threshold(fgray, fmask, binThresh, 255, cv::THRESH_BINARY);
+    cv::threshold(sgray, smask, binThresh, 255, cv::THRESH_BINARY);
+
+    cv::Mat openKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5,5));
+    cv::morphologyEx(fmask, fmask, cv::MORPH_OPEN, openKernel);
+    cv::morphologyEx(smask, smask, cv::MORPH_OPEN, openKernel);
+
+    cv::Mat closeKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(11,11));
+    cv::morphologyEx(fmask, fmask, cv::MORPH_CLOSE, closeKernel);
+    cv::morphologyEx(smask, smask, cv::MORPH_CLOSE, closeKernel);
+
+    cv::Mat first_card = extractBestCrop(fmask, frame_part1);
+    cv::Mat second_card = extractBestCrop(smask, frame_part2);
+
+    std::string s1 = video.stem().string() + "RESIZED";
+    std::string s2 = video.stem().string() + "RESIZED";
+
+    cv::Mat resized_first_card = extractAndNormalizeCard(first_card, debug, s1);
+    cv::Mat resized_second_card = extractAndNormalizeCard(second_card, debug, s2);
+
+    if (resized_first_card.cols > resized_first_card.rows) {
+        cv::rotate(resized_first_card, resized_first_card, cv::ROTATE_90_CLOCKWISE);
+    }
+    if (resized_second_card.cols > resized_second_card.rows) {
+        cv::rotate(resized_second_card, resized_second_card, cv::ROTATE_90_CLOCKWISE);
     }
 
-    cv::Mat excludeMask1;
-    if (briscolaBox.has_value()) {
-        excludeMask1 = briscolaBox->mask;
-    } else {
-        excludeMask1 = cv::Mat::zeros(frame_part1.size(), CV_8UC1);
-    }
-
-    // Find first card on part1 with briscola masked out
-    std::optional<CardBBox> firstBox = briscola::findBBox({video}, 0, pat.part1_idx, debug, excludeMask1);
-    if (firstBox.has_value()) {
-        firstPred = getBoWClassifier().classify(firstBox->image, debug);
-    }
-
-    // Combine briscola and first card masks to exclude both
-    cv::Mat excludeMask2;
-    if (briscolaBox.has_value() && firstBox.has_value()) {
-        cv::bitwise_or(briscolaBox->mask, firstBox->mask, excludeMask2);
-    } else if (briscolaBox.has_value()) {
-        excludeMask2 = briscolaBox->mask;
-    } else if (firstBox.has_value()) {
-        excludeMask2 = firstBox->mask;
-    } else {
-        excludeMask2 = cv::Mat::zeros(frame_part2.size(), CV_8UC1);
-    }
-
-    // Find second card on part2 with both previous cards masked out
-    std::optional<CardBBox> secondBox = briscola::findBBox({video}, 0, pat.part2_idx, debug, excludeMask2);
-    if (secondBox.has_value()) {
-        secondPred = getBoWClassifier().classify(secondBox->image, debug);
-    }
+    std::optional<CardPrediction> firstPred  = getBoWClassifier().classify(resized_first_card, debug);
+    std::optional<CardPrediction> secondPred = getBoWClassifier().classify(resized_second_card, debug);
 
     RoundObservation obs;
     obs.leader = leader;
@@ -380,8 +491,6 @@ RoundObservation KMeansBowRoundAnalyzer::analyze(
         obs.northCard = firstPred;
         obs.southCard = secondPred;
     }
-
-    obs.briscolaCandidate = briscolaPred;
 
     if (debug) {
         std::string s3 = video.stem().string() + "_first_frame";
