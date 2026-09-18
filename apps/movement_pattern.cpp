@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
             } else if (option == "--debug-dir" && ++index < argc) {
                 debugDirectory = argv[index];
             } else {
-                throw std::runtime_error("invalid option");
+                throw std::runtime_error("invalid option movement pattern");
             }
         }
 

@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
             } else if (opt == "--debug-dir" && i + 1 < argc) {
                 debugDirectory = argv[++i];
             } else {
-                throw std::runtime_error("invalid option: " + opt);
+                throw std::runtime_error("invalid option briscola bow: " + opt);
             }
         }
 
