@@ -25,30 +25,36 @@
 
 namespace briscola {
 
-    /// @brief Geometric assessment of a single connected-component blob,
-    /// used to decide whether it is a plausible card rectangle.
-    ///
-    /// After K-Means segmentation the candidate cluster is typically fragmented
-    /// into many blobs. Each blob is scored independently on five geometric
-    /// properties; only blobs that pass every minimum threshold are accepted.
-    /// Among the accepted ones, the highest scorer is taken as the card.
+    /**
+     * @brief Geometric assessment of a single connected-component blob,
+     * used to decide whether it is a plausible card rectangle.
+     *
+     * After K-Means segmentation the candidate cluster is typically fragmented
+     * into many blobs. Each blob is scored independently on five geometric
+     * properties; only blobs that pass every minimum threshold are accepted.
+     * Among the accepted ones, the highest scorer is taken as the card.
+     */
     struct BlobScore {
-        int label; ///< Index assigned by connectedComponentsWithStats.
-        cv::Rect boundingBox; ///< Axis-aligned bounding box of the blob in image coordinates.
-        double area; ///< Pixel count of the blob.
-        double aspectRatio; ///< Longer side divided by shorter side, always >= 1.
-        double solidity; ///< area / convex-hull area. Close to 1 for convex shapes, lower for irregular ones.
-        double extent; ///< area / bounding-box area. Close to 1 for shapes that fill their bbox tightly.
-        double rectangularity; ///< area / minimum-area-rectangle area. Close to 1 for axis-aligned or rotated rectangles.
-        double score; ///< Weighted combination of solidity, extent and rectangularity. 0 = irregular, 1 = perfect rectangle.
-        bool accepted; ///< True if every geometric threshold was met. Only accepted blobs compete for the final card slot.
+        int label; // Index assigned by connectedComponentsWithStats.
+        cv::Rect boundingBox; // Axis-aligned bounding box of the blob in image coordinates.
+        double area; // Pixel count of the blob.
+        double aspectRatio; // Longer side divided by shorter side, always >= 1.
+        double solidity; // area / convex-hull area. Close to 1 for convex shapes, lower for irregular ones.
+        double extent; // area / bounding-box area. Close to 1 for shapes that fill their bbox tightly.
+        double rectangularity; // area / minimum-area-rectangle area. Close to 1 for axis-aligned or rotated rectangles.
+        double score; // Weighted combination of solidity, extent and rectangularity. 0 = irregular, 1 = perfect rectangle.
+        bool accepted; // True if every geometric threshold was met. Only accepted blobs compete for the final card slot.
     };
-    /// @brief Snapshot of all diagnostic data produced by one round of the K-Means pipeline.
-    ///
-    /// Keeping this separate from the provider function avoids cluttering the main
-    /// logic with debug plots. plotKMeansDebug() reads exclusively from this
-    /// struct, so the debug path and the processing path stay decoupled: if debug
-    /// is null the struct is never constructed.
+
+    /**
+     * @brief Snapshot of all diagnostic data produced by one round of the
+     * K-Means pipeline.
+     *
+     * Keeping this separate from the provider function avoids cluttering the main
+     * logic with debug plots. plotKMeansDebug() reads exclusively from this
+     * struct, so the debug path and the processing path stay decoupled: if debug
+     * is null the struct is never constructed.
+     */
     struct KMeansDebugData {
         const cv::Mat& frame; /// Original unmodified frame, visual reference.
         const cv::Mat& binaryRaw; /// Binary mask of the candidate cluster straight out of K-Means.
@@ -60,29 +66,47 @@ namespace briscola {
         cv::Rect boundingBox; ///  bounding box of the detected card in image coordinates. (0,0,0,0) if no BBox
     };
 
-    /// @brief Score a single blob against a set of geometric thresholds and decide
-    /// whether it is a plausible card rectangle.
-    ///
-    /// The function runs five checks. Each test computes one
-    /// geometric property and returns early with accepted=false if the value falls
-    /// outside the allowed range.-
-    /// The thresholds have deliberately loose defaults because the card may be
-    /// partially occluded, rotated, or affected by lighting: being too strict here
-    /// causes false negatives that are hard to diagnose, while false positives are
-    /// caught downstream by taking only the single highest-scoring accepted blob.
-    ///
-    /// @param componentLabels Label map returned by connectedComponentsWithStats. Needed to identify which pixels belong to this specific blob.
-    /// @param stats Stats matrix (N x 5, CV_32S) returned by connectedComponentsWithStats. Provides x, y, w, h, area without iterating the whole image.
-    /// @param label Index of the blob to evaluate, in [1, numLabels-1]. Label 0 is the background and must never be passed here.
-    /// @param imageArea Total pixel count of the frame (rows * cols). Used to express area thresholds as fractions of the image.
-    /// @param minAreaRatio Blobs smaller than this fraction of the image are noise. Default 0.2%.
-    /// @param maxAreaRatio Blobs larger than this fraction are likely the background leaking in. Default 60%.
-    /// @param minAspect Minimum aspect ratio (long/short >= 1). Catches degenerate slivers. Default 0.1.
-    /// @param maxAspect Maximum aspect ratio. A playing card is never extremely elongated. Default 10.
-    /// @param minSolidity Minimum area/convex-hull-area ratio. Lowered from the classical 0.70 to 0.55 to tolerate cards that are partially covered by another card or the player's hand.
-    /// @param minExtentMinimum area/bounding-box-area ratio. Lowered to 0.45 for the same reason.
-    /// @param minRectangularity Minimum area/minAreaRect-area ratio. 0.50 allows for moderate rotation and partial occlusion without rejecting a valid card.
-    /// @return A BlobScore with accepted=true and a score in (0,1] if all tests pass, or accepted=false and score=0 on the first failing gate.
+    /**
+     * @brief Score a single blob against a set of geometric thresholds and decide
+     * whether it is a plausible card rectangle.
+     *
+     * The function runs five checks. Each test computes one
+     * geometric property and returns early with accepted=false if the value falls
+     * outside the allowed range.
+     *
+     * The thresholds have deliberately loose defaults because the card may be
+     * partially occluded, rotated, or affected by lighting: being too strict here
+     * causes false negatives that are hard to diagnose, while false positives are
+     * caught downstream by taking only the single highest-scoring accepted blob.
+     *
+     * @param componentLabels Label map returned by connectedComponentsWithStats.
+     *        Needed to identify which pixels belong to this specific blob.
+     * @param stats Stats matrix (N x 5, CV_32S) returned by
+     *        connectedComponentsWithStats. Provides x, y, w, h, area without
+     *        iterating the whole image.
+     * @param label Index of the blob to evaluate, in [1, numLabels-1]. Label 0 is
+     *        the background and must never be passed here.
+     * @param imageArea Total pixel count of the frame (rows * cols). Used to
+     *        express area thresholds as fractions of the image.
+     * @param minAreaRatio Blobs smaller than this fraction of the image are noise.
+     *        Default 0.2%.
+     * @param maxAreaRatio Blobs larger than this fraction are likely the
+     *        background leaking in. Default 60%.
+     * @param minAspect Minimum aspect ratio (long/short >= 1). Catches degenerate
+     *        slivers. Default 0.1.
+     * @param maxAspect Maximum aspect ratio. A playing card is never extremely
+     *        elongated. Default 10.
+     * @param minSolidity Minimum area/convex-hull-area ratio. Lowered from the
+     *        classical 0.70 to 0.55 to tolerate cards that are partially covered
+     *        by another card or the player's hand.
+     * @param minExtent Minimum area/bounding-box-area ratio. Lowered to 0.45 for
+     *        the same reason.
+     * @param minRectangularity Minimum area/minAreaRect-area ratio. 0.50 allows
+     *        for moderate rotation and partial occlusion without rejecting a
+     *        valid card.
+     * @return A BlobScore with accepted=true and a score in (0,1] if all tests
+     *         pass, or accepted=false and score=0 on the first failing gate.
+     */
     BlobScore scoreCardBlob(
         const cv::Mat& componentLabels,
         const cv::Mat& stats,
@@ -166,13 +190,17 @@ namespace briscola {
         return s;
     }
 
-    /// @brief Compute a brightness proxy for a K-Means cluster centroid.
-    ///
-    /// The centroid coordinates are the mean BGR values of all pixels assigned to
-    /// the cluster.
-    /// @param centers K-Means centroid matrix (K x 3, CV_32F) as returned by cv::kmeans.
-    /// @param cluster Row index of the cluster whose brightness is requested.
-    /// @return Unweighted sum B+G+R of the centroid, in [0, 765].
+    /**
+     * @brief Compute a brightness proxy for a K-Means cluster centroid.
+     *
+     * The centroid coordinates are the mean BGR values of all pixels assigned to
+     * the cluster.
+     *
+     * @param centers K-Means centroid matrix (K x 3, CV_32F) as returned by
+     *        cv::kmeans.
+     * @param cluster Row index of the cluster whose brightness is requested.
+     * @return Unweighted sum B+G+R of the centroid, in [0, 765].
+     */
     float brightness(
         const cv::Mat& centers,
         int cluster
@@ -232,8 +260,9 @@ namespace briscola {
             d.roundPath.stem().string(), 0, blobReport);
     }
 
-    ///@brief Expand BBox but keep the center
-    
+    /**
+     * @brief Expand BBox but keep the center
+     */
     cv::Rect expandRect(
         const cv::Rect& r,
         double factor,
@@ -248,7 +277,11 @@ namespace briscola {
         return e;
     }
     //######################### MAIN FUNCTIONS #########################
-    
+    /**
+     * @brief Locates the most card-like blob in a single frame and returns
+     * its geometry and an aligned crop, or std::nullopt if no blob
+     * passes the geometric thresholds.
+     */
     std::optional<CardBBox> findBBox(
         const std::vector<std::filesystem::path>& path, //path of every ROUND
         int round,
@@ -496,8 +529,7 @@ namespace briscola {
                 binaryMask, ccLabels, ccStats, ccCentroids, 8, CV_32S
             );
 
-                        // Pick the largest blob above a minimum area.
-            //
+            // Pick the largest blob above a minimum area.
             // The candidate mask is dominated by the card, but still
             // contains small fragments (leftover checkerboard squares,
             // specular highlights, print noise). The 0.5% threshold
@@ -708,11 +740,10 @@ namespace briscola {
     }
     
     
-    //######################### CARD RECOGNITION (KMEANS + BOW) #########################          
-    //###################### BRISCOLA FINDER ######################
-    std::optional<Card> KMeansBriscolaProvider::find(
+    //######################### CARD RECOGNITION (KMEANS + BOW) ######################### 
+    //###################### BRISCOLA DETECTION+CONF ######################
+    std::optional<CardPrediction> runBriscolaDetection(
         const std::vector<std::filesystem::path>& path,
-        const std::vector<RoundObservation>&,
         DebugSink* debug
     ) {
         // Try each round, then each frame within the round, until a card is
@@ -734,9 +765,14 @@ namespace briscola {
                 }
             }
         }
-
+        if (!bbox.has_value()) {
+            if (debug) {
+                std::cout << "runBriscolaDetection: no card found in any frame" << std::endl;
+            }
+            return std::nullopt;
+        }
         const cv::Mat& cropped = bbox->image;
-        const std::optional<Card> card = getBoWClassifier().classify(cropped, debug);
+        const std::optional<CardPrediction> card = getBoWClassifier().classify(cropped, debug);
 
         // Debug: log the rotated rect (for verifying the rotation) and publish
         // an overlay with the rotated rect drawn on the frame and the
@@ -791,7 +827,7 @@ namespace briscola {
 
             std::string label;
             if (card.has_value()) {
-                label = std::to_string(card->rank) + " " + suitName(card->suit);
+                label = std::to_string(card->card.rank) + " " + suitName(card->card.suit);
             } else {
                 label = "unknown";
             }
@@ -824,6 +860,26 @@ namespace briscola {
         }
         return card;
     }
+    //######################### FIND + CONFIDENCE ######################### 
+    std::optional<CardPrediction> KMeansBriscolaProvider::findWithConfidence(
+        const std::vector<std::filesystem::path>& path,
+        DebugSink* debug
+    ) {
+        return runBriscolaDetection(path, debug);
+    }
+    //######################### FIND #########################
+    std::optional<Card> KMeansBriscolaProvider::find(
+        const std::vector<std::filesystem::path>& path,
+        const std::vector<RoundObservation>&,
+        DebugSink* debug
+    ) {
+        const std::optional<CardPrediction> prediction =
+        runBriscolaDetection(path, debug);
+        if (!prediction.has_value()) {
+            
+        }
+        return prediction->card;
+    } 
 }
 
 

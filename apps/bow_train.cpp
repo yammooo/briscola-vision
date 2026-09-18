@@ -2,23 +2,26 @@
 
 #include <iostream>
 #include <filesystem>
-/// @brief Offline training entry point for the BoVW classifier.
-///
-/// Loads the reference card templates, builds the visual vocabulary and
-/// the augmented reference histograms, and writes both to disk. The
-/// trained classifier is not used here: this binary is meant to be run
-/// once per training set, and the resulting files are then loaded at
-/// runtime by the application (KMeansBriscolaProvider::getBoVWClassifier).
-/// Command-line arguments:
-///   argv[1]  templatesDir   directory of reference images named
-///                           "<rank>-<suit>.JPG" (e.g. "3-spades.JPG")
-///   argv[2]  vocabularyOut  output path for the vocabulary file
-///   argv[3]  histogramsOut  output path for the histograms file
-///   argv[4]  K (optional)   number of visual words; see the note below
-///
-/// Exit codes:
-///   0  success
-///   1  wrong arguments, training failure, or I/O failure
+/**
+ * @brief Offline training entry point for the BoVW classifier.
+ *
+ * Loads the reference card templates, builds the visual vocabulary and
+ * the augmented reference histograms, and writes both to disk. The
+ * trained classifier is not used here: this binary is meant to be run
+ * once per training set, and the resulting files are then loaded at
+ * runtime by the application (KMeansBriscolaProvider::getBoVWClassifier).
+ *
+ * Command-line arguments:
+ *   argv[1]  templatesDir   directory of reference images named
+ *                           "<rank>-<suit>.JPG" (e.g. "3-spades.JPG")
+ *   argv[2]  vocabularyOut  output path for the vocabulary file
+ *   argv[3]  histogramsOut  output path for the histograms file
+ *   argv[4]  K (optional)   number of visual words; see the note below
+ *
+ * Exit codes:
+ *   0  success
+ *   1  wrong arguments, training failure, or I/O failure
+ */
 int main(int argc, char** argv) {
     // Require at least the three mandatory paths. K is optional and falls
     // back to a default, so a call with only three arguments is valid and

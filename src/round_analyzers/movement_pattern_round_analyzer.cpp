@@ -698,12 +698,8 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         std::optional<CardBBox> briscolaBox;
         briscolaBox = briscola::findBBox({video}, 0, 0, debug);
         if (briscolaBox.has_value()) {
-        std::optional<Card> briscolaCard =
-            getBoWClassifier().classify(briscolaBox->image, debug);
-        if (briscolaCard.has_value()) {
-            briscolaPred = CardPrediction{*briscolaCard, 1.0f};
+            std::optional<CardPrediction> briscolaPred = getBoWClassifier().classify(briscolaBox->image, debug);
         }
-    }
         // bbox->mask is already the card's bounding box expanded by 20%,
         // filled solid. It is exactly what we want as an exclusion mask:
         // it covers the briscola (and the first card) with enough margin
@@ -741,18 +737,10 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         // orientation as the reference templates), so we can pass it
         // directly to the BoW classifier without further preprocessing.
         if (firstBox.has_value()) {
-            std::optional<Card> firstCard =
-                getBoWClassifier().classify(firstBox->image, debug);
-            if (firstCard.has_value()) {
-                firstPred = CardPrediction{*firstCard, 1.0f};
-            }
+            firstPred = getBoWClassifier().classify(firstBox->image, debug);
         }
         if (secondBox.has_value()) {
-            std::optional<Card> secondCard =
-                getBoWClassifier().classify(secondBox->image, debug);
-            if (secondCard.has_value()) {
-                secondPred = CardPrediction{*secondCard, 1.0f};
-            }
+            secondPred = getBoWClassifier().classify(secondBox->image, debug);
         }
     } else {
         // Blob detection & cropping helper (weighted by proximity to center) : we need to find the card bounding

@@ -1,10 +1,11 @@
-/// @brief Sanity check for the BoW classifier: classifies every reference
-/// template against the trained vocabulary and reports how many are
-/// correctly identified.
-///
-/// Usage:
-///   bow_sanity_check <templatesDir> [--debug-dir DIR]
-
+/**
+ * @brief Sanity check for the BoW classifier: classifies every reference
+ * template against the trained vocabulary and reports how many are
+ * correctly identified.
+ *
+ * Usage:
+ *   bow_sanity_check <templatesDir> [--debug-dir DIR]
+ */
 #include "briscola/bow_classifier.hpp"
 
 #include <opencv2/imgcodecs.hpp>
@@ -98,7 +99,7 @@ int main(int argc, char** argv) {
             }
 
             ++total;
-            const std::optional<briscola::Card> predicted =
+            const std::optional<briscola::CardPrediction> predicted =
                 classifier.classify(image, debugPtr);
 
             const std::string expectedStr =
@@ -113,11 +114,11 @@ int main(int argc, char** argv) {
             }
 
             const std::string predictedStr =
-                std::to_string(predicted->rank) + "-" + briscola::suitName(predicted->suit);
+                std::to_string(predicted->card.rank) + "-" + briscola::suitName(predicted->card.suit);
 
             const bool ok =
-                predicted->rank == expected.rank &&
-                predicted->suit == expected.suit;
+                predicted->card.rank == expected.rank &&
+                predicted->card.suit == expected.suit;
 
             std::cout << "  " << (ok ? "OK  " : "FAIL")
                       << "  " << path.filename().string()

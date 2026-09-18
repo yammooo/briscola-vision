@@ -188,26 +188,12 @@ done
 echo "=== 4. Movement pattern on game1round1 ==="
 ./build/movement_pattern data/Briscola_Trentine data/game1/game1round1.mp4 --bow
 
-echo "=== 5. Evaluation baseline ==="
-./build/evaluate_movement_pattern data/Briscola_Trentine \
-    data/game1 data/game1resultsCORRECTED.csv \
-    data/game2 data/game2resultsCORRECTED.csv \
-    data/game3 data/game3resultsCORRECTED.csv \
-    data/game4 data/game4resultsCORRECTED.csv > /tmp/baseline.txt
-
-echo "=== 6. Evaluation BoVW ==="
+echo "=== 5. Evaluation BoW ==="
 ./build/evaluate_movement_pattern data/Briscola_Trentine --bow \
     data/game1 data/game1resultsCORRECTED.csv \
     data/game2 data/game2resultsCORRECTED.csv \
     data/game3 data/game3resultsCORRECTED.csv \
     data/game4 data/game4resultsCORRECTED.csv > /tmp/bow.txt
-
-echo "=== 7. Confront ==="
-echo "Baseline:"
-tail -10 /tmp/baseline.txt
-echo ""
-echo "BoVW:"
-tail -10 /tmp/bow.txt
 
 echo "=== Done ==="
 ```
