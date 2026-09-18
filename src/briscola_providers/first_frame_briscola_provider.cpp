@@ -1,4 +1,5 @@
 #include "briscola/briscola_providers/first_frame_briscola_provider.hpp"
+#include "briscola/timing_profile.hpp"
 
 #include <opencv2/core.hpp>
 #include <opencv2/features2d.hpp>
@@ -146,7 +147,7 @@ void FirstFrameBriscolaProvider::loadTemplatesFromFolder(const std::filesystem::
     }
 }
 
-// EFFICIENCY IMPROVED
+//EFFICIENCY IMPROVEMENTS
 std::optional<Card> FirstFrameBriscolaProvider::find(
     const std::vector<std::filesystem::path>& videos,
     const std::vector<RoundObservation>&,
@@ -155,29 +156,106 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
     ensureTemplatesLoaded();
     if (templates_.empty()) return std::nullopt;
 
-    std::filesystem::path target;
+    auto t_frame_start = std::chrono::steady_clock::now();
+    std::filesystem::path path1, path17, path20;
     for (const auto& p : videos) {
         const std::string fname = p.filename().string();
-        if (fname.find("round1.mp4") != std::string::npos) { target = p; break; }
+        if (fname.find("round1.mp4") != std::string::npos) path1 = p;
+        else if (fname.find("round17.mp4") != std::string::npos) path17 = p;
+        else if (fname.find("round20.mp4") != std::string::npos) path20 = p;
     }
-    if (target.empty() && !videos.empty()) target = videos.front();
-    if (target.empty()) return std::nullopt;
+    if (path1.empty() && !videos.empty()) path1 = videos.front();
+    if (path1.empty()) return std::nullopt;
 
-    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create(0, 3, 0.03, 10, 1.6);
-    cv::BFMatcher matcher(cv::NORM_L2);
+    cv::Rect briscolaRoi;
+    if (!path17.empty() && !path20.empty()) {
+        auto maybeF17 = openFirstFrame(path17);
+        auto maybeF20 = openFirstFrame(path20);
+        if (maybeF17 && maybeF20 && maybeF17->size() == maybeF20->size() && !maybeF17->empty()) {
+            cv::Mat diff, grayDiff, mask;
+            cv::absdiff(*maybeF17, *maybeF20, diff);
+            cv::cvtColor(diff, grayDiff, cv::COLOR_BGR2GRAY);
+            cv::GaussianBlur(grayDiff, grayDiff, cv::Size(15, 15), 0);
+            cv::threshold(grayDiff, mask, 25, 255, cv::THRESH_BINARY);
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(9, 9));
+            cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+            cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
 
-    auto maybeFrame = openFirstFrame(target);
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+            const int h = mask.rows;
+            const int w = mask.cols;
+            const double minY = h * 0.40;
+            const double maxY = h * 0.65;
+
+            double bestArea = -1.0;
+            cv::Point centerPt(w / 2, static_cast<int>(h * 0.52));
+            bool foundBlob = false;
+
+            for (const auto& c : contours) {
+                cv::Rect r = cv::boundingRect(c);
+                double cy = r.y + r.height / 2.0;
+                if (cy >= minY && cy <= maxY) {
+                    double area = static_cast<double>(r.width) * r.height;
+                    if (area > bestArea) {
+                        bestArea = area;
+                        centerPt = cv::Point(r.x + r.width / 2, r.y + r.height / 2);
+                        foundBlob = true;
+                    }
+                }
+            }
+
+            if (!foundBlob) {
+                for (const auto& c : contours) {
+                    cv::Rect r = cv::boundingRect(c);
+                    double area = static_cast<double>(r.width) * r.height;
+                    if (area > bestArea) {
+                        bestArea = area;
+                        centerPt = cv::Point(r.x + r.width / 2, r.y + r.height / 2);
+                        foundBlob = true;
+                    }
+                }
+            }
+
+            if (foundBlob) {
+                const int roiSize = 500;
+                int rx = std::max(0, std::min(centerPt.x - roiSize / 2, w - roiSize));
+                int ry = std::max(0, std::min(centerPt.y - roiSize / 2, h - roiSize));
+                int rw = std::min(roiSize, w - rx);
+                int rh = std::min(roiSize, h - ry);
+                briscolaRoi = cv::Rect(rx, ry, rw, rh);
+            }
+        }
+    }
+
+    auto maybeFrame = openFirstFrame(path1);
     if (!maybeFrame) return std::nullopt;
     cv::Mat frame = *maybeFrame;
 
+    cv::Mat searchImage;
+    if (briscolaRoi.width > 0 && briscolaRoi.height > 0 &&
+        briscolaRoi.x + briscolaRoi.width <= frame.cols &&
+        briscolaRoi.y + briscolaRoi.height <= frame.rows) {
+        searchImage = frame(briscolaRoi);
+    } else {
+        searchImage = frame;
+    }
+
     cv::Mat gray;
-    toGray(frame, gray);
+    toGray(searchImage, gray);
+
+    const cv::Ptr<cv::SIFT> sift = cv::SIFT::create(0, 3, 0.03, 10, 1.6);
+    cv::BFMatcher matcher(cv::NORM_L2);
 
     std::vector<cv::KeyPoint> frameKpts;
     cv::Mat frameDesc;
     extractSIFT(sift, gray, frameKpts, frameDesc);
     if (frameDesc.empty() || frameKpts.empty()) return std::nullopt;
+    auto t_after_sift = std::chrono::steady_clock::now();
+    getGlobalProfiler().briscolaFrameSiftSec += std::chrono::duration<double>(t_after_sift - t_frame_start).count();
 
+    auto t_match_start = std::chrono::steady_clock::now();
     int bestInliers = 0;
     std::optional<Card> bestCard;
 
@@ -189,6 +267,8 @@ std::optional<Card> FirstFrameBriscolaProvider::find(
             bestCard = tpl.card;
         }
     }
+    auto t_after_match = std::chrono::steady_clock::now();
+    getGlobalProfiler().briscolaMatchingSec += std::chrono::duration<double>(t_after_match - t_match_start).count();
 
     if (debug && bestCard) debug->publishText("first-frame", "provider", 0, "Selected briscola candidate");
 
