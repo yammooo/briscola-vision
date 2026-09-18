@@ -12,10 +12,11 @@
 
 namespace briscola {
 //############################ DATA AUGMENTATION HELPER ############################
-
-/// @brief Rotates the card by `angle` degrees around its center, using
-/// border replication to avoid black corners.
-cv::Mat rotateCard(const cv::Mat& src, double angle) {
+    /**
+     * @brief Rotates the card by `angle` degrees around its center,
+     *  using border replication to avoid black corners.
+     */
+    cv::Mat rotateCard(const cv::Mat& src, double angle) {
     cv::Mat out;
     cv::Point2f center(src.cols / 2.0f, src.rows / 2.0f);
     cv::Mat rotMat = cv::getRotationMatrix2D(center, angle, 1.0);
@@ -23,18 +24,21 @@ cv::Mat rotateCard(const cv::Mat& src, double angle) {
                    cv::INTER_LINEAR, cv::BORDER_REPLICATE);
     return out;
 }
-
-/// @brief Applies alpha (contrast) and beta (brightness) to the image:
-/// out = alpha * src + beta, with per-channel saturation to [0, 255].
+    /**
+     * @brief Applies alpha (contrast) and beta (brightness) to the image: 
+     * out = alpha * src + beta, with per-channel saturation to [0, 255].
+     */
 cv::Mat adjustBrightnessContrast(const cv::Mat& src, double alpha, double beta) {
     cv::Mat out;
     src.convertTo(out, -1, alpha, beta);
     return out;
 }
 
-/// @brief Scales the card by `scale` around its center, then center-crops
-/// or pads to the original size, so the output has the same dimensions as
-/// the input. This simulates different camera distances.
+/**
+ * @brief Scales the card by `scale` around its center, then center-crops
+ * or pads to the original size, so the output has the same dimensions as
+ * the input. This simulates different camera distances.
+ */
 cv::Mat scaleCard(const cv::Mat& src, double scale) {
     cv::Mat resized;
     cv::resize(src, resized, cv::Size(), scale, scale, cv::INTER_LINEAR);
@@ -68,18 +72,19 @@ cv::Mat blurCard(const cv::Mat& src, int ksize) {
     return out;
 }
 
-/// @brief Simulates the crop that the detector produces when the card is
-/// half-covered by another card. The output contains only the visible
-/// portion of the card.
-///
-/// @param src    Input card image (BGR), assumed to be the full card.
-/// @param mode   1 = top half visible, bottom half covered
-///               2 = bottom half visible, top half covered
-///               3 = left half visible, right half covered
-///               4 = right half visible, left half covered
-///               5 = top 2/3 visible, bottom 1/3 covered
-///               6 = bottom 2/3 visible, top 1/3 covered
-
+/**
+ * @brief Simulates the crop that the detector produces when the card is
+ * half-covered by another card. The output contains only the visible
+ * portion of the card.
+ *
+ * @param src    Input card image (BGR), assumed to be the full card.
+ * @param mode   1 = top half visible, bottom half covered
+ *               2 = bottom half visible, top half covered
+ *               3 = left half visible, right half covered
+ *               4 = right half visible, left half covered
+ *               5 = top 2/3 visible, bottom 1/3 covered
+ *               6 = bottom 2/3 visible, top 1/3 covered
+ */
 cv::Mat cropHalfWithContext(const cv::Mat& src, int mode) {
     const int W = src.cols;
     const int H = src.rows;
@@ -110,8 +115,10 @@ cv::Mat cropHalfWithContext(const cv::Mat& src, int mode) {
     }
     return out;
 }
-/// @brief Parses a template filename stem "<rank>-<suit>" into a Card.
-/// @return std::nullopt if the stem does not match the expected format.
+/**
+ * @brief Parses a template filename stem "<rank>-<suit>" into a Card.
+ * @return std::nullopt if the stem does not match the expected format.
+ */
 std::optional<Card> parseTemplateName(const std::filesystem::path& templatePath) {
     const std::string stem = templatePath.stem().string();
     const std::size_t dashPos = stem.find('-');
@@ -134,9 +141,11 @@ std::optional<Card> parseTemplateName(const std::filesystem::path& templatePath)
     return Card{rank, suit};
 }
 
-/// @brief Builds a normalized K-bin histogram from the assignment of
-/// `descriptors` to `vocabulary` rows. Each descriptor votes for its nearest
-/// vocabulary word.
+/**
+ * @brief Builds a normalized K-bin histogram from the assignment of
+ * `descriptors` to `vocabulary` rows. Each descriptor votes for its nearest
+ * vocabulary word.
+ */
 cv::Mat buildHistogram(
     const cv::Mat& descriptors,
     const cv::Mat& vocabulary,
@@ -161,42 +170,10 @@ cv::Mat buildHistogram(
 
 
 //########################### TRAINING ###########################
-/// @brief Builds the BoW vocabulary and the reference histograms from a
-/// directory of card templates.
-///
-/// The procedure is:
-///   1. For every template in `templatesDir`, generate a set of augmented
-///      variants (occlusions, rotations, illumination changes, scaling,
-///      blur) that simulate the conditions under which the detector will
-///      later observe the card: partial occlusion by another card, variable
-///      lighting, video compression, different distances. Training only on
-///      the original templates makes the vocabulary blind to these real
-///      conditions, and the classifier degrades sharply when the query crop
-///      does not match the pristine template.
-///   2. Extract SIFT descriptors from every variant and accumulate them.
-///   3. Run k-means on the accumulated descriptors to build a vocabulary of
-///      `vocabularySize` visual words. The vocabulary is the quantizer that
-///      maps each descriptor to its nearest word.
-///   4. For every variant, quantize its descriptors against the vocabulary
-///      and store the resulting histogram (plus the card label) as a
-///      reference. At query time, the classifier compares the query
-///      histogram to all reference histograms and returns the label of the
-///      closest one.
-///
-/// The function is expensive (k-means on maxDescriptors = 500 => 1M descriptors) and is meant to
-/// run offline. The result is persisted with save() and reloaded at startup
-/// with load(), so the training cost is paid only once.
-///
-/// @param templatesDir  Directory containing the reference card images,
-///        named "<rank>-<suit>.JPG" (e.g. "3-spades.JPG").
-/// @param vocabularySize  Number of visual words (K) in the vocabulary.
-///        I tested a large range, from 50 to 800. Usually i opted for 200 or 400 for tests.
-/// @param maxDescriptorsPerTemplate  Upper bound on the number of SIFT
-///        descriptors kept per variant. Without this cap, variants with
-///        rich textures (e.g. heavily rotated cards with border replication)
-///        would dominate the k-means clustering and the vocabulary would
-///        be biased toward those variants.) the best rreuslt i acheved was with max = 2000
-///        very slow in training but got right 4/4 seeds and 2/4 ranks. 
+/**
+ * @brief Builds the BoW vocabulary and the reference histograms from a
+ * directory of card templates.
+ */
 void BoWClassifier::train(
     const std::filesystem::path& templatesDir,
     int vocabularySize,
@@ -376,7 +353,7 @@ void BoWClassifier::train(
         }
     }
 
-        // Need at least two variants to run k-means. In practice, with 40 cards
+    // Need at least two variants to run k-means. In practice, with 40 cards
     // and ~50 variants each, this is always satisfied; the check exists to
     // fail loudly if the templates directory is empty or misconfigured.
     if (allDescriptors.size() < 2) {
@@ -403,7 +380,7 @@ void BoWClassifier::train(
     std::cout << "BoWClassifier::train: total descriptors = " << all.rows
               << " of dimension " << all.cols << std::endl;
 
-        // Build the vocabulary with k-means. Each of the K resulting centroids
+    // Build the vocabulary with k-means. Each of the K resulting centroids
     // is a "visual word": a representative descriptor that stands for a
     // cluster of similar descriptors. The vocabulary is the quantizer used
     // by buildHistogram() to assign each query descriptor to its nearest
@@ -436,14 +413,10 @@ void BoWClassifier::train(
     );
     std::cout << "BoWClassifier::train: vocabulary built" << std::endl;
 
-        // For every variant, quantize its descriptors against the vocabulary
+    // For every variant, quantize its descriptors against the vocabulary
     // and build a reference histogram. Each histogram is a (1 x K) vector
     // where bin j counts how many of the variant's descriptors were
-    // assigned to visual word j, plus a (1 x 512) color histogram appended
-    // by buildHistogram(). The color part compensates for the fact that
-    // SIFT is grayscale: without it, suits with the same shape but
-    // different colors (e.g. Clubs vs Coins, both with similar silhouette
-    // patterns) would be indistinguishable.
+    // assigned to visual word j.
     //
     // The histograms are stored in histograms_ together with their Card
     // labels in labels_. At query time, classify() builds a query histogram
@@ -462,26 +435,13 @@ void BoWClassifier::train(
               << " histograms ready" << std::endl;
 }
 
-/// @brief Persists the trained classifier to two files on disk: the
-/// vocabulary matrix and the reference histograms (with their labels).
-/// Both files are written in YAML via cv::FileStorage. YAML is chosen over
-/// a raw binary dump because it is human-readable: opening the file in a
-/// text editor shows the structure, which is useful for debugging (for example
-/// verifying that the vocabulary has K rows, or that the histograms have
-/// the expected size). The cost is a larger file and slower I/O, but both
-/// are negligible at this scale (K × 128 floats + 1960 × (K + 512) floats).
-/// The vocabulary and the histograms are written to two separate files
-/// instead of a single one because they have different lifecycles: the
-/// vocabulary is a pure function of the training set, while the histograms
-/// depend on the labels and on the vocabulary itself. Keeping them apart
-/// makes it easier to swap one without touching the other (e.g. re-run
-/// k-means without re-extracting descriptors, or add new cards without
-/// rebuilding the vocabulary).
-/// @param vocabularyPath  Output path for the vocabulary matrix (K x D).
-/// @param histogramsPath  Output path for the reference histograms and
-///        their labels (one rank/suit pair per histogram).
-/// @throws std::runtime_error if the classifier is not trained or if either
-///         file cannot be opened for writing.
+/**
+ * @brief Saves vocabulary and template histograms to disk using
+ * cv::FileStorage (YAML/XML).
+ *
+ * @param vocabularyPath  Output path for the vocabulary matrix (K x D).
+ * @param histogramsPath  Output path for the template histograms and labels.
+ */
 void BoWClassifier::save(
     const std::filesystem::path& vocabularyPath,
     const std::filesystem::path& histogramsPath
@@ -517,25 +477,16 @@ void BoWClassifier::save(
     // first FileStorage alive, the YAML document could be truncated on
     // process exit, especially if an exception is thrown later in the
     // function.
-    // --- Histograms file ---
+
+
+    // Histograms file 
     // Contains, for each reference histogram:
-    //   - the histogram itself, a (1 x (K + 512)) row vector (the first K
-    //     bins are the BoW histogram, the last 512 are the HSV color
-    //     histogram concatenated by buildHistogram);
+    //   - the histogram itself, a (1 x K) row vector; 
     //   - the rank and suit of the card it was extracted from, so that
     //     classify() can return a Card instead of an index into the
     //     histogram array.
     // The histograms and the labels are stored as flat lists with a "count"
-    // header, rather than a single matrix + a single label matrix, because
-    // FileStorage serializes scalar/vector/matrix types naturally but does
-    // not have a first-class "array of matrices with parallel metadata".
-    // The flat-list form is the simplest encoding that round-trips without
-    // custom parsing.
-    // Labels are stored as two separate scalars (rank and suit) per
-    // histogram, not as a single struct, because FileStorage cannot
-    // serialize arbitrary C++ structs. The suit enum is cast to int
-    // because FileStorage does not know about enum types either; the cast
-    // back to Suit happens in load().
+    // header.
     {
         cv::FileStorage fs(histogramsPath.string(), cv::FileStorage::WRITE);
         if (!fs.isOpened()) {
@@ -545,16 +496,11 @@ void BoWClassifier::save(
         }
 
         // Explicit count so that load() can loop without having to peek at
-        // the file or rely on FileStorage's iteration semantics, which are
-        // more awkward to use and less robust to format changes.
+        // the file or rely on FileStorage's iteration semantics.
         fs << "count" << static_cast<int>(histograms_.size());
 
         // One named entry per histogram. The names are generated
-        // ("hist_0", "rank_0", "suit_0", ...) instead of using a YAML
-        // sequence because FileStorage's sequence API is less convenient
-        // for load(): indexing by name is straightforward, indexing by
-        // position requires reading the whole sequence into a temporary
-        // and re-parsing it.
+        // ("hist_0", "rank_0", "suit_0", ...).
         for (std::size_t i = 0; i < histograms_.size(); ++i) {
             fs << ("hist_" + std::to_string(i)) << histograms_[i];
             fs << ("rank_" + std::to_string(i)) << labels_[i].rank;
@@ -564,43 +510,20 @@ void BoWClassifier::save(
 }
 
 //################################ LOADER ################################
-/// @brief Restores a previously saved classifier from disk.
-///
-/// Reads the vocabulary and the reference histograms written by save(),
-/// replacing whatever state the classifier currently holds. Both files
-/// must be present and readable: a missing or corrupted file causes an
-/// immediate exception, so the caller cannot accidentally run with a
-/// half-initialized classifier and produce meaningless matches.
-///
-/// The function does not validate the content beyond what FileStorage
-/// itself checks. In particular, it does not verify that:
-///   - vocabulary_.rows == vocabularySize_,
-///   - each histogram has the expected (K + 512) length,
-///   - the number of histograms equals the number of labels,
-///   - the label values are within the valid rank/suit ranges.
-///
-/// Those checks are skipped on purpose: a well-formed file produced by
-/// save() always satisfies them, and a hand-edited or mismatched file is
-/// a setup error that the caller should fix, not something the loader
-/// should silently patch. If a corrupted file becomes a real risk (e.g.
-/// the classifier is loaded from an untrusted source), add an explicit
-/// validation step here rather than sprinkling defensive checks through
-/// the rest of the class.
-///
-/// @param vocabularyPath  Path to the vocabulary file written by save().
-/// @param histogramsPath  Path to the histograms file written by save().
-/// @throws std::runtime_error if either file cannot be opened.
+/**
+ * @brief Loads vocabulary and template histograms from disk.
+ *
+ * @throws std::runtime_error if either file is missing or malformed.
+ */
 void BoWClassifier::load(
     const std::filesystem::path& vocabularyPath,
     const std::filesystem::path& histogramsPath
 ) {
-    // --- Vocabulary ---
+    // Vocabulary
     // The vocabulary is read first because it defines K, which is not
     // needed for reading the histograms (each histogram carries its own
     // length implicitly) but is needed by classify() to size the query
-    // histogram consistently. Reading it first also makes the error
-    // message deterministic if both files are missing: the caller sees
-    // the vocabulary error, which is the more fundamental of the two.
+    // histogram consistently.
     {
         cv::FileStorage fs(vocabularyPath.string(), cv::FileStorage::READ);
         if (!fs.isOpened()) {
@@ -611,12 +534,8 @@ void BoWClassifier::load(
         fs["vocabulary"] >> vocabulary_;
         fs["vocabularySize"] >> vocabularySize_;
     }
-    // Scope closed to release the FileStorage before touching the second
-    // file. Two open FileStorage objects are allowed but not needed here,
-    // and keeping them open longer increases the window in which a failed
-    // load leaves the file handles dangling.
-
-    // --- Histograms and labels ---
+    // Scope closed to release the FileStorage 
+    // Histograms and labels 
     {
         cv::FileStorage fs(histogramsPath.string(), cv::FileStorage::READ);
         if (!fs.isOpened()) {
@@ -625,38 +544,22 @@ void BoWClassifier::load(
             );
         }
 
-        // The count is stored explicitly in the file so that the loop does
-        // not have to discover the number of entries by probing. This is
-        // both faster and more robust: FileStorage does not provide a
-        // clean way to iterate over names matching a prefix, so without
-        // the count we would have to try "hist_0", "hist_1", ... until a
-        // read fails, which conflates "end of file" with "corrupted file".
         int count = 0;
         fs["count"] >> count;
 
         // Replace the current contents. clear() + reserve() is preferred
         // over constructing new vectors because the classifier may be
-        // reused across loads (e.g. reloading a different file after a
-        // configuration change), and reusing the existing capacity is
-        // cheaper than reallocating from scratch when the new file has a
-        // similar size.
-        //
+        // reused across loads.
         // No guard against an empty count: a file with count=0 is valid
         // and simply produces an untrained classifier, which isReady()
-        // will report as not ready. Refusing to load an empty classifier
-        // would prevent legitimate use cases (e.g. probing a file to see
-        // if it has been populated).
+        // will report as not ready.
         histograms_.clear();
         labels_.clear();
         histograms_.reserve(count);
         labels_.reserve(count);
 
         // Read the entries one by one. The order of reads (hist, rank,
-        // suit) matches the order of writes in save() for symmetry, but
-        // FileStorage does not care about order: each entry is looked up
-        // by name. The loop is O(count) FileStorage lookups, which is
-        // acceptable because loading happens once at startup and count
-        // is bounded by the size of the training set (a few thousand).
+        // suit) matches the order of writes in save() for symmetry.
         for (int i = 0; i < count; ++i) {
             cv::Mat hist;
             int rank = 0;
@@ -665,96 +568,42 @@ void BoWClassifier::load(
             // The names are reconstructed from the loop index, matching
             // the names generated in save(). This is the reason the names
             // are "hist_0", "hist_1", ... rather than a YAML sequence:
-            // reconstruction is trivial and does not require parsing.
+            // reconstruction is easy and does not require parsing.
             fs[("hist_" + std::to_string(i))] >> hist;
             fs[("rank_" + std::to_string(i))] >> rank;
             fs[("suit_" + std::to_string(i))] >> suitInt;
 
             histograms_.push_back(hist);
 
-            // static_cast<Suit>(suitInt) is safe because save() wrote the
-            // suit as static_cast<int>(suit), so the value is guaranteed
-            // to be a valid enumerator of Suit. A hand-edited file with
-            // an out-of-range value would produce an invalid Suit, but
-            // that is the same class of error as a corrupted file and is
-            // not handled here (see the note in the doc-comment).
             labels_.push_back(Card{rank, static_cast<Suit>(suitInt)});
         }
     }
 }
 
 //################################ ISREADY #####################################
-/// @brief Returns true if the classifier holds enough state to run
-/// classify() safely.
-///
-/// The check verifies that the three
-/// pieces of state that classify() depends on are present and mutually
-/// consistent, without inspecting their values.
-/// The three conditions are:
-///   - vocabulary_ is not empty, i.e. train() or load() populated the
-///     visual words. Without it, buildHistogram() has nothing to quantize
-///     the query descriptors against.
-///   - histograms_ is not empty, i.e. at least one reference histogram
-///     exists. Without it, classify() has no candidate to compare the
-///     query against, and would either return nullopt or (worse) index
-///     into an empty vector.
-///   - histograms_ and labels_ have the same size. The two containers
-///     are populated in parallel by train() and load(), and classify()
-///     reads labels_[bestIndex] using an index derived from histograms_.
-///     A size mismatch means the labels are misaligned with the
-///     histograms, and the returned Card would be wrong for the matched
-///     histogram. This is the only consistency check that classify() can
-///     actually rely on, so it is included here.
-/// Other invariants (vocabulary dimension, histogram length, label
-/// ranges) are deliberately NOT checked: they are guaranteed by save()
-/// and load() when the files are well-formed, and verifying them on every
-/// call would be redundant. If a corrupted file becomes a real risk, the
-/// validation belongs in load(), not here.
-///
-/// The function is cheap (three O(1) checks) and is called at the top of
-/// classify(), so it runs on every query. Keeping it O(1) is a hard
-/// requirement, not a preference.
+/**
+ * @brief True if the classifier has a vocabulary and at least one
+ * template histogram, i.e. classify() can be called.
+ */
 bool BoWClassifier::isReady() const {
     return !vocabulary_.empty() && !histograms_.empty() &&
            histograms_.size() == labels_.size();
 }
 
 //################################# CLASSIFIER #################################
-/// @brief Classifies a single cropped card image against the reference
-/// histograms.
-///
-/// The procedure mirrors the one used during training for the reference
-/// histograms, which is the key invariant: the query histogram and the
-/// reference histograms must be built the same way, or the chi-square
-/// distance is meaningless. Both go through buildHistogram(), which
-/// concatenates a BoW histogram (SIFT descriptors quantized against the
-/// vocabulary) with an HSV color histogram, and both are L1-normalized.
-///
-/// The match is a nearest-neighbour search in the space of histograms,
-/// using the chi-square distance. The reference with the smallest distance
-/// wins, and its Card label is returned.
-///
-/// The function is deliberately conservative about returning a result:
-///   - if the classifier is not ready (no vocabulary, no references, or
-///     inconsistent state), it returns nullopt;
-///   - if the crop is empty or yields no SIFT descriptors, it returns
-///     nullopt.
-///
-/// It does NOT apply a confidence threshold on the best distance. The
-/// caller receives the nearest reference regardless of how far it is,
-/// because in this application a wrong-but-committed answer is often
-/// preferable to no answer (the RoundAnalyzer can use a "unknown" result
-/// as a signal to try another frame). If a threshold is needed, it should
-/// be added by the caller, not here, since the appropriate value depends
-/// on how the result will be used.
-///
-/// @param cropped  BGR image containing a single card.
-/// @return The Card label of the nearest reference histogram, or
-///         std::nullopt if the classifier is not ready or the crop yields
-///         no descriptors.
-std::optional<Card> BoWClassifier::classify(
+/**
+ * @brief Classifies a cropped card image.
+ *
+ * @param cropped  BGR image containing a single card.
+ * @param debug Debug sink
+ * @return The recognized Card, or std::nullopt if the crop had no
+ *         descriptors or the best match exceeded the threshold.
+ */
+std::optional<CardPrediction> BoWClassifier::classify(
     const cv::Mat& cropped,
-    DebugSink* debug
+    DebugSink* debug,
+    double clearDistance,
+    double ambiguousDistance
 ) const {
     // Fail-safe early exits. Both conditions return nullopt rather than
     // throwing: classify() is called in a loop over candidate frames, and
@@ -767,13 +616,13 @@ std::optional<Card> BoWClassifier::classify(
         return std::nullopt;
     }
 
-    // 1. Extract SIFT descriptors from the query crop. The same detector
-    //    is used at training time, which is required: descriptors from a
-    //    different detector (e.g. ORB instead of SIFT) live in a different
-    //    space and cannot be compared to the vocabulary. The keypoints
-    //    themselves are not used after this point — only the descriptors
-    //    matter — but detectAndCompute fills them as a side effect and
-    //    there is no cheaper API to get only the descriptors.
+    // Extract SIFT descriptors from the query crop. The same detector
+    // is used at training time, which is required: descriptors from a
+    // different detector (e.g. ORB instead of SIFT) live in a different
+    // space and cannot be compared to the vocabulary. The keypoints
+    // themselves are not used after this point — only the descriptors
+    // matter — but detectAndCompute fills them as a side effect and
+    // there is no cheaper API to get only the descriptors.
     std::vector<cv::KeyPoint> keypoints;
     cv::Mat descriptors;
     detector_->detectAndCompute(cropped, cv::noArray(), keypoints, descriptors);
@@ -788,15 +637,11 @@ std::optional<Card> BoWClassifier::classify(
         return std::nullopt;
     }
 
-    // 2. Build the query histogram with the same procedure used for the
-    //    reference histograms. The vocabulary_ and vocabularySize_ come
-    //    from the training phase (or from load()); they define the
-    //    quantization grid. The color part is appended inside
-    //    buildHistogram(), so the returned histogram has size
-    //    (K + 512) and is directly comparable to the references.
+    // Build the query histogram with the same procedure used for the
+    // reference histograms.
     const cv::Mat queryHist = buildHistogram(descriptors, vocabulary_, vocabularySize_);
 
-    // 3. Compare the query histogram to every reference, using chi-square.
+    //    Compare the query histogram to every reference, using chi-square.
     //
     //    Why chi-square and not L2 or intersection:
     //      - L2 penalizes large bin values quadratically, which makes the
@@ -812,8 +657,6 @@ std::optional<Card> BoWClassifier::classify(
     //
     //    All distances are collected, not just the minimum, because the
     //    debug output below needs the full sorted list to show the top 5.
-    //    The cost is one extra vector allocation per query, which is
-    //    negligible compared to the descriptor extraction step.
     std::vector<std::pair<double,int>> allDistances;
     allDistances.reserve(histograms_.size());
 
@@ -822,17 +665,8 @@ std::optional<Card> BoWClassifier::classify(
         allDistances.push_back({dist, static_cast<int>(i)});
     }
 
-    // Sort ascending: allDistances[0] is the best match (smallest distance).
-    // std::pair's default ordering compares the first element first, so
-    // sorting by the pair sorts by distance; ties are broken by index,
-    // which is irrelevant for correctness but keeps the order deterministic
-    // across runs.
     std::sort(allDistances.begin(), allDistances.end());
 
-    // After isReady() returned true, histograms_ is non-empty, so
-    // allDistances is non-empty. This check is defensive: it documents the
-    // invariant and protects against a future change where isReady() stops
-    // guaranteeing non-emptiness.
     if (allDistances.empty()) {
         return std::nullopt;
     }
@@ -840,17 +674,7 @@ std::optional<Card> BoWClassifier::classify(
     const int bestIndex = allDistances[0].second;
     const double bestDistance = allDistances[0].first;
 
-    // Debug output: the top 5 matches and the winner. This is printed
-    // unconditionally (not gated on a debug flag) because classify() is
-    // called a handful of times per video and the output is short. If the
-    // call frequency increases, gate this on a member flag or a DebugSink
-    // to avoid flooding the console.
-    // The label is printed with the numeric suit value, not the string
-    // name, because classify() does not know about the name mapping
-    // (suitName() lives in a different translation unit). A future
-    // refactor could move suitName() to a shared header and print the
-    // human-readable name here.
-    
+    // Debug output: the top 5 matches and the winner.
     if(debug){
         std::cout << "Top 5 matches:" << std::endl;
         for (int i = 0; i < 5 && i < static_cast<int>(allDistances.size()); ++i) {
@@ -864,12 +688,20 @@ std::optional<Card> BoWClassifier::classify(
         std::cout << "BoW classify: bestIndex=" << bestIndex
                 << " bestDistance=" << bestDistance << std::endl;
     }
-    // Return the label of the best reference. The caller is responsible
-    // for deciding whether the match is confident enough to use: classify()
-    // commits to an answer whenever it can produce one, and the caller
-    // can compare bestDistance (not exposed here, but recoverable from
-    // the debug output) against a threshold if needed.
-    return labels_[bestIndex];
+    // Confidence: map the best chi-square distance to [0, 1] 
+    //using two tresholds. Linear interpolation in between
+    double confidence = 1.0;
+    if (bestDistance >= ambiguousDistance) {
+        confidence = 0.0;
+    } else if (bestDistance > clearDistance) {
+        confidence = (ambiguousDistance - bestDistance) /
+                     (ambiguousDistance - clearDistance);
+    }
+
+    CardPrediction result;
+    result.card = labels_[bestIndex];
+    result.confidence = static_cast<float>(confidence);
+    return result;
 }
 
 //######################### HELPERS #########################
