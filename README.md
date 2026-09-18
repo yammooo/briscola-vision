@@ -49,8 +49,8 @@ This pipeline was built as a fast alternative to the YOLO/SIFT pipeline. The goa
 
 ### Core intuition
 
-The hand movements of the players are a telltale sign that a card has been placed on the table. When a player plays a card, its hand enters the frame causing a spike in "movement", then the hand slows down to place the card causing the movement to lower temporarily, then the hand draws back causing a second spike in movement. This pattern occurs twice per round — once per player — and the still frames that follow each pattern are exactly the moments when the newly placed cards are clearly visible on the table. 
-By taking the difference between the very first frame and the frame after the first placement, we get the position of the newly placed card. By taking the difference of the frame with first card placement and the frame with the second card placement we get the position of the second played card. 
+The hand movements of the players are a telltale sign that a card has been placed on the table. When a player plays a card, its hand enters the frame causing a spike in "movement", then the hand slows down to place the card causing the movement to lower temporarily, then the hand draws back causing a second spike in movement. This pattern occurs twice per round — once per player — and the still frames that follow each pattern are exactly the moments when the newly placed cards are clearly visible on the table.
+By taking the difference between the very first frame and the frame after the first placement, we get the position of the newly placed card. By taking the difference of the frame with first card placement and the frame with the second card placement we get the position of the second played card.
 
 ### How it works
 
@@ -70,7 +70,152 @@ The pipeline relies on the assumption that **each player's hand fully retreats b
 
 Use this pipeline when speed matters and game footage follows a clear play-and-retreat pattern. Use YOLO/SIFT when maximum accuracy is the priority, and when the play and retreat pattern is ot followed.
 
+## K-Means + BoVW pipeline
 
+This pipeline was built to explore how far a fully classical, non-neural, non-SIFT approach could go on the same task. The goal was not to beat the YOLO/local-feature or movement-pattern pipelines, but to map the boundary of a bag-of-visual-words classifier on the specific conditions of this dataset: a card lying on a checked tablecloth, often partially covered by another card, filmed from a fixed camera.
+
+### Core intuition
+
+The detector does not need a neural network to find the card. On this table, the card face is a large, uniform, bright region, while the tablecloth is a repeating light/dark pattern. A Gaussian blur large enough to span one checkerboard period collapses the cloth to a mid-gray, and a local variance map then separates the smooth card face from the textured cloth by a single scalar. K-Means on the blurred frame segments the remaining colour space, and a connected-components + geometric scoring step picks the single blob that is most rectangular and most card-like. The result is a bounding box and a rotated rect that hug the card, with no learned model.
+
+Recognition is delegated to a Bag of Visual Words classifier. A vocabulary of K visual words is built by running k-means over SIFT descriptors extracted from the 40 reference cards and their augmented variants. Each card is then represented by a histogram over the visual words, and a query crop is matched to the reference with the smallest chi-square distance.
+
+### How it works
+
+**Bounding box** (`KMeansBriscolaProvider::findBBox`): a Gaussian blur (81x81) suppresses the checkerboard, a local variance map (21x21 window) isolates spatially uniform regions, and K-Means (K=6, table = 5 largest clusters) segments the blurred frame. The brightest foreground cluster is assumed to be the card face. The mask is intersected with the uniform-region mask, the largest blob is kept, closed with a 21x21 rectangle kernel to seal the holes left by the printed figures, and its outer contour is flood-filled. Each filled blob is scored on five geometric properties (area, aspect ratio, extent, solidity, rectangularity); the highest-scoring accepted blob becomes the card. Both the axis-aligned bbox and the rotated `minAreaRect` are returned, along with an already-rotated card crop and a silhouette mask used for inhibition.
+
+**Recognition** (`BoWClassifier`): the training set is the 40 reference cards, each expanded into a set of augmented variants. The augmentation covers rotations (including 180° for upside-down cards), illumination changes, scaling, blur, and partial occlusions. The occlusions are produced by cropping the card to a fraction of its area (40%–90% visible, centered). SIFT descriptors are extracted from every variant and clustered into K=800 visual words with k-means. Each variant produces one reference histogram of size K. At query time, the crop is aligned to the axes using the rotated rect, SIFT descriptors are extracted, the query histogram is built the same way, and the best match is chosen by chi-square distance over all reference histograms.
+
+**Pipeline integration**: `KMeansBriscolaProvider::find` scans up to 30 frames per round, calls `findBBox` on each, and on the first successful detection classifies the aligned crop. The provider is a drop-in implementation of `IBriscolaProvider`.
+
+**Round analysis** (`MovementPatternRoundAnalyzer`, `--bow` flag): the same BoW classifier can replace the built-in template matcher inside the movement-pattern analyzer. The analyzer's scheduling logic (motion detection, three-frame selection, leader inference) is reused unchanged; only the recognition step is swapped. Because the frames selected by the movement analyzer contain multiple cards (the briscola and the played cards), `findBBox` is called with an exclusion mask that hides the cards already identified, so the largest remaining blob is the card we are looking for. The mask is the expanded bounding box returned by the previous `findBBox` call, so no extra geometry is computed.
+
+### Strengths
+
+- **No neural network, no training data, no GPU**: only OpenCV and the 40 reference scans.
+- **Deterministic**: apart from k-means seeding (fixed at 42 for reproducibility) and the SIFT keypoint selection, the pipeline is fully deterministic.
+- **Vocabulary size has an empirical sweet spot**: with 40 cards and many augmented variants, K=800 gave the best trade-off; smaller K collapsed the vocabulary onto itself, larger K overfits.
+- **Robust to upside-down cards**: the training set includes 180°-rotated variants and the query classification tests both orientations, so cards played by the player sitting opposite the camera are handled correctly.
+- **Provider and analyzer are decoupled**: the same BoW classifier works both as a briscola provider (single card in the frame) and as a round-analyzer classifier (multiple cards, with inhibition).
+
+### Weaknesses and known failure mode
+
+The pipeline is sensitive to occlusion, and this is intrinsic to the bag-of-words paradigm. When the card is covered by another card, the crop contains only the visible portion, the histogram loses the descriptors of the covered symbols, and the nearest reference can be a different card that happens to share the visible pattern. The failure mode is systematic: a card whose visible face shows fewer symbols than the real card (four denari visible on a six-coins, five spade tips visible on a four-spades) is misclassified toward the visually present rank.
+
+Despite this, the briscola card was recovered correctly on all four provided games, and the played-card classification is around 50% across the four games. SIFT, which matches descriptors locally and uses geometric verification, does not suffer from this failure mode and is the recommended method when occlusion is expected.
+
+A colour extension was also tried: an HSV histogram was appended to the BoVW histogram, on the assumption that the colour would help separate Cups from Coins and Clubs form Spades (two pairs suits with the most similar silhouette). The extension was implemented and tested, but it degraded the overall accuracy instead of improving it. The most likely reason is that by adding a second, coarser colour channel to the same histogram drowned the discriminative signal in the noise of the tablecloth colours. The colour extension was therefore removed, and the pipeline uses the BoVW histogram alone.
+
+Use this pipeline when the card is fully visible or minimally occluded, when a learned model cannot be used, and when the vocabulary can be rebuilt offline. Prefer YOLO/local-feature when occlusion is the norm and the rank must be exact.
+
+### Build and run
+
+The BoW pipeline adds one library source, one training binary, and two inspection binaries to the project. The training step must be run once before the pipeline can be used; it reads the 40 reference scans from `data/Briscola_Trentine` and writes two files under `models/bow`.
+
+```sh
+# Configure and build the whole project.
+cmake -S . -B build
+cmake --build build -j
+
+# Train the BoW vocabulary and the reference histograms.
+# K = number of visual words; 800 was the best value on this dataset.
+# This step takes a few minutes; it only needs to be run once.
+mkdir -p models/bow
+./build/bow_train data/Briscola_Trentine models/bow/vocab.yml models/bow/hist.yml 800
+
+# Sanity check: classify every reference template against the trained
+# vocabulary. A healthy classifier classifies all of them correctly.
+# Use this to confirm the training is consistent before running the
+# pipeline on videos.
+./build/bow_sanity_check data/Briscola_Trentine
+
+# Run the provider on the first video of a game folder, print the
+# recognized briscola, optionally dump debug images.
+./build/briscola_bow data/game1
+./build/briscola_bow data/game1 --debug-window --debug-dir /tmp/bow-debug
+
+# Run the movement-pattern analyzer with the BoW classifier instead of
+# the built-in template matcher.
+./build/movement_pattern data/Briscola_Trentine data/game1/game1round1.mp4 --bow
+./build/movement_pattern data/Briscola_Trentine data/game1/game1round1.mp4 --bow --debug-dir /tmp/mp-debug
+
+# Evaluate the whole game with the BoW classifier as the round analyzer
+# and the FirstFrameBriscolaProvider as the briscola provider. The CSV
+# is the ground truth for the game.
+./build/evaluate_movement_pattern data/Briscola_Trentine --bow \
+    data/game1 data/game1resultsCORRECTED.csv \
+    data/game2 data/game2resultsCORRECTED.csv \
+    data/game3 data/game3resultsCORRECTED.csv \
+    data/game4 data/game4resultsCORRECTED.csv
+
+# Same evaluation with the built-in template matcher, for comparison.
+./build/evaluate_movement_pattern data/Briscola_Trentine \
+    data/game1 data/game1resultsCORRECTED.csv \
+    data/game2 data/game2resultsCORRECTED.csv \
+    data/game3 data/game3resultsCORRECTED.csv \
+    data/game4 data/game4resultsCORRECTED.csv
+```
+
+### Full test script
+
+The commands above can be run in sequence to build the project, train the
+vocabulary from scratch, and run every check on the four provided games.
+The script writes the two evaluation reports to `/tmp/baseline.txt` and
+`/tmp/bow.txt` and prints their summaries side by side, so the two
+pipelines can be compared at a glance.
+
+```bash
+#!/bin/bash
+set -e
+
+echo "=== 0. Build ==="
+cmake -S . -B build
+cmake --build build -j
+
+echo "=== 1. Training ==="
+mkdir -p models/bow
+./build/bow_train data/Briscola_Trentine models/bow/vocab.yml models/bow/hist.yml 800
+
+echo "=== 2. Sanity check ==="
+./build/bow_sanity_check data/Briscola_Trentine
+
+echo "=== 3. Briscola on 4 games ==="
+for g in game1 game2 game3 game4; do
+    echo "--- $g ---"
+    ./build/briscola_bow data/$g 2>&1 | tail -1
+done
+
+echo "=== 4. Movement pattern on game1round1 ==="
+./build/movement_pattern data/Briscola_Trentine data/game1/game1round1.mp4 --bow
+
+echo "=== 5. Evaluation baseline ==="
+./build/evaluate_movement_pattern data/Briscola_Trentine \
+    data/game1 data/game1resultsCORRECTED.csv \
+    data/game2 data/game2resultsCORRECTED.csv \
+    data/game3 data/game3resultsCORRECTED.csv \
+    data/game4 data/game4resultsCORRECTED.csv > /tmp/baseline.txt
+
+echo "=== 6. Evaluation BoVW ==="
+./build/evaluate_movement_pattern data/Briscola_Trentine --bow \
+    data/game1 data/game1resultsCORRECTED.csv \
+    data/game2 data/game2resultsCORRECTED.csv \
+    data/game3 data/game3resultsCORRECTED.csv \
+    data/game4 data/game4resultsCORRECTED.csv > /tmp/bow.txt
+
+echo "=== 7. Confront ==="
+echo "Baseline:"
+tail -10 /tmp/baseline.txt
+echo ""
+echo "BoVW:"
+tail -10 /tmp/bow.txt
+
+echo "=== Done ==="
+```
+
+The training step (step 1) only needs to be re-run when the training set
+changes (new reference scans, different augmentation, different K). For
+repeated test runs on an unchanged training set, the script can be started
+from step 2.
 
 ## Build
 
