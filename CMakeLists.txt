@@ -23,6 +23,7 @@ add_library(briscola
     src/rules.cpp
     src/round_analyzers/yolo_sift_round_analyzer.cpp
     src/round_analyzers/movement_pattern_round_analyzer.cpp
+    src/round_analyzers/kmeans_bow_round_analyzer.cpp
     src/bow_classifier.cpp
 )
 target_include_directories(briscola PUBLIC
@@ -48,6 +49,12 @@ target_link_libraries(movement_pattern PRIVATE briscola)
 
 add_executable(evaluate_movement_pattern apps/evaluate_movement_pattern.cpp)
 target_link_libraries(evaluate_movement_pattern PRIVATE briscola)
+
+add_executable(kmeans_bow apps/kmeans_bow.cpp)
+target_link_libraries(kmeans_bow PRIVATE briscola)
+
+add_executable(evaluate_kmeans_bow apps/evaluate_kmeans_bow.cpp)
+target_link_libraries(evaluate_kmeans_bow PRIVATE briscola)
 
 add_executable(bow_train apps/bow_train.cpp)
 target_link_libraries(bow_train PRIVATE briscola)

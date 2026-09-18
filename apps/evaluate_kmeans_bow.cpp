@@ -1,30 +1,23 @@
-// evaluate_movement_pattern.cpp
+// evaluate_kmeans_bow.cpp
 //
-// Runs MovementPatternRoundAnalyzer + FirstFrameBriscolaProvider on one or
+// Runs KMeansBowRoundAnalyzer + KMeansBriscolaProvider on one or
 // more game folders, compares each prediction to its own ground truth CSV
 // and prints a detailed per-round table plus aggregate metrics.
 //
 // Usage:
-//   evaluate_movement_pattern CARD_REFS GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]
-//
-// Output goes to stdout (your terminal). Redirect to a file with > out.txt
-// if you want to save it.
+//   evaluate_kmeans_bow CARD_REFS GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]
 
-#include "briscola/briscola_providers/first_frame_briscola_provider.hpp"
+#include "briscola/briscola_providers/k_means_briscola_provider.hpp"
 #include "briscola/evaluation.hpp"
 #include "briscola/game.hpp"
 #include "briscola/io.hpp"
-#include "briscola/round_analyzers/movement_pattern_round_analyzer.hpp"
+#include "briscola/round_analyzers/kmeans_bow_round_analyzer.hpp"
 
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 static const char* suitStr(briscola::Suit s) {
     switch (s) {
@@ -60,13 +53,7 @@ static void printMetric(const char* name, const briscola::Metric& m) {
               << (m.total ? 100.0 * m.correct / m.total : 0.0) << "%)\n";
 }
 
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
 int main(int argc, char* argv[]) {
-    // argc must be: exe + CARD_REFS + pairs (GAME_FOLDER CSV)
-    // Minimum: exe CARD_REFS GAME_FOLDER CSV  => argc == 4
     if (argc < 4 || (argc - 2) % 2 != 0) {
         std::cerr << "Usage: " << argv[0]
                   << " CARD_REFS GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]\n";
@@ -75,7 +62,6 @@ int main(int argc, char* argv[]) {
 
     const std::filesystem::path refsPath = argv[1];
 
-    // Parse (gameFolder, csvPath) pairs
     struct GameEntry {
         std::filesystem::path folder;
         std::filesystem::path csv;
@@ -86,15 +72,11 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        // Load the 40 card reference images
         const auto references = briscola::readCardReferences(refsPath);
+        briscola::KMeansBowRoundAnalyzer analyzer(references);
+        briscola::KMeansBriscolaProvider briscolaProvider;
+        briscola::GameRunner runner(analyzer, briscolaProvider);
 
-        // Build analyzer and briscola provider (shared across all games)
-        briscola::MovementPatternRoundAnalyzer analyzer(references, /*useOrb=*/false);
-        briscola::FirstFrameBriscolaProvider   briscolaProvider(refsPath);
-        briscola::GameRunner                   runner(analyzer, briscolaProvider);
-
-        // Grand-total accumulators
         int totalRounds   = 0;
         int totalNorthOk  = 0;
         int totalSouthOk  = 0;
@@ -106,7 +88,6 @@ int main(int argc, char* argv[]) {
             std::cout << "  Game: " << entry.folder.filename().string() << "\n";
             std::cout << "========================================\n";
 
-            // Load this game's ground truth
             briscola::GameResult groundTruth;
             try {
                 groundTruth = briscola::readGroundTruthCsv(entry.csv);
@@ -115,7 +96,6 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
-            // Run the pipeline
             briscola::GameResult prediction;
             try {
                 prediction = runner.run(entry.folder, nullptr,
@@ -129,7 +109,6 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
-            // Briscola summary line
             const auto gtB = groundTruth.briscola;
             std::cout << "  Briscola  pred: ";
             if (prediction.briscola)
@@ -140,7 +119,6 @@ int main(int argc, char* argv[]) {
                       << (gtB ? std::to_string(gtB->rank) + "-" + suitStr(gtB->suit) : "n/a")
                       << "\n\n";
 
-            // Per-round table
             const int maxRounds = static_cast<int>(
                 std::min(prediction.rounds.size(), groundTruth.rounds.size()));
 
@@ -163,28 +141,28 @@ int main(int argc, char* argv[]) {
             int gameLeaderOk = 0;
 
             for (int r = 0; r < maxRounds; ++r) {
-                const auto& pred = prediction.rounds[r].observation;
-                const auto& gt   = groundTruth.rounds[r].observation;
+                const auto& pr = prediction.rounds[r].observation;
+                const auto& gr = groundTruth.rounds[r].observation;
 
-                bool northOk  = cardEq(pred.northCard, gt.northCard);
-                bool southOk  = cardEq(pred.southCard, gt.southCard);
-                bool leaderOk = pred.leader == gt.leader;
+                bool nOk = cardEq(pr.northCard, gr.northCard);
+                bool sOk = cardEq(pr.southCard, gr.southCard);
+                bool lOk = pr.leader && gr.leader && *pr.leader == *gr.leader;
 
-                if (northOk)  ++gameNorthOk;
-                if (southOk)  ++gameSouthOk;
-                if (leaderOk) ++gameLeaderOk;
+                if (nOk) gameNorthOk++;
+                if (sOk) gameSouthOk++;
+                if (lOk) gameLeaderOk++;
 
                 std::cout << std::left
                           << std::setw(4)  << (r + 1)
-                          << std::setw(12) << cardStr(pred.northCard)
-                          << std::setw(12) << cardStr(gt.northCard)
-                          << std::setw(4)  << (northOk  ? "OK" : "X")
-                          << std::setw(12) << cardStr(pred.southCard)
-                          << std::setw(12) << cardStr(gt.southCard)
-                          << std::setw(4)  << (southOk  ? "OK" : "X")
-                          << std::setw(8)  << playerStr(pred.leader)
-                          << std::setw(8)  << playerStr(gt.leader)
-                          << std::setw(4)  << (leaderOk ? "OK" : "X")
+                          << std::setw(12) << cardStr(pr.northCard)
+                          << std::setw(12) << cardStr(gr.northCard)
+                          << std::setw(4)  << (nOk ? "OK" : "X")
+                          << std::setw(12) << cardStr(pr.southCard)
+                          << std::setw(12) << cardStr(gr.southCard)
+                          << std::setw(4)  << (sOk ? "OK" : "X")
+                          << std::setw(8)  << playerStr(pr.leader)
+                          << std::setw(8)  << playerStr(gr.leader)
+                          << std::setw(4)  << (lOk ? "OK" : "X")
                           << "\n";
             }
 
@@ -198,44 +176,38 @@ int main(int argc, char* argv[]) {
             totalSouthOk  += gameSouthOk;
             totalLeaderOk += gameLeaderOk;
 
-            // evaluate() report (uses the existing helper)
-            try {
-                const auto report = briscola::evaluate(prediction, groundTruth);
-                std::cout << "\n  --- evaluate() ---\n";
-                printMetric("Cards",       report.cards);
-                printMetric("Players",     report.players);
-                printMetric("Briscola",    report.briscola);
-                printMetric("Game result", report.gameResult);
-            } catch (const std::exception& e) {
-                std::cerr << "  (evaluate() skipped: " << e.what() << ")\n";
-            }
+            const auto ev = briscola::evaluate(prediction, groundTruth);
+            std::cout << "\n  --- evaluate() ---\n";
+            printMetric("Cards",       ev.cards);
+            printMetric("Players",     ev.players);
+            printMetric("Briscola",    ev.briscola);
+            printMetric("Game result", ev.gameResult);
         }
 
-        // Grand total across all games
-        if (games.size() > 1) {
-            const auto pct = [](int ok, int tot) {
-                return tot ? 100.0 * ok / tot : 0.0;
-            };
-            std::cout << "\n========================================\n";
-            std::cout << "  GRAND TOTAL  (" << games.size() << " games, "
+        if (games.size() > 1 && totalRounds > 0) {
+            std::cout << "\n";
+            std::cout << "========================================\n";
+            std::cout << "  GRAND TOTAL (" << games.size() << " games, "
                       << totalRounds << " rounds)\n";
             std::cout << "========================================\n";
-            std::cout << std::fixed << std::setprecision(1);
             std::cout << "  North cards : " << totalNorthOk  << "/" << totalRounds
-                      << "  (" << pct(totalNorthOk,  totalRounds) << "%)\n";
+                      << "  (" << std::fixed << std::setprecision(1)
+                      << (100.0 * totalNorthOk  / totalRounds) << "%)\n";
             std::cout << "  South cards : " << totalSouthOk  << "/" << totalRounds
-                      << "  (" << pct(totalSouthOk,  totalRounds) << "%)\n";
-            std::cout << "  Both cards  : "
-                      << (totalNorthOk + totalSouthOk) << "/" << (2 * totalRounds)
-                      << "  (" << pct(totalNorthOk + totalSouthOk, 2 * totalRounds) << "%)\n";
+                      << "  (" << std::fixed << std::setprecision(1)
+                      << (100.0 * totalSouthOk  / totalRounds) << "%)\n";
             std::cout << "  Leader      : " << totalLeaderOk << "/" << totalRounds
-                      << "  (" << pct(totalLeaderOk, totalRounds) << "%)\n";
+                      << "  (" << std::fixed << std::setprecision(1)
+                      << (100.0 * totalLeaderOk / totalRounds) << "%)\n";
+            std::cout << "  Total cards : " << (totalNorthOk + totalSouthOk) << "/" << (totalRounds * 2)
+                      << "  (" << std::fixed << std::setprecision(1)
+                      << (100.0 * (totalNorthOk + totalSouthOk) / (totalRounds * 2)) << "%)\n";
         }
 
         return 0;
 
     } catch (const std::exception& e) {
-        std::cerr << "Fatal error: " << e.what() << "\n";
+        std::cerr << "FATAL ERROR: " << e.what() << "\n";
         return 1;
     }
 }

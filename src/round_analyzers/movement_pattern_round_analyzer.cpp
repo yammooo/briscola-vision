@@ -1,8 +1,6 @@
 #include "briscola/round_analyzers/movement_pattern_round_analyzer.hpp"
-#include "briscola/briscola_providers/k_means_briscola_provider.hpp"
 
 #include "briscola/debug.hpp"
-#include "briscola/bow_classifier.hpp"
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -566,12 +564,19 @@ cv::Mat renderSignalPlot(
 } // anonymous namespace
 
 
+
+
+
+
+
+
+
+
 // EFFICIENCY IMPROVEMENT
 MovementPatternRoundAnalyzer::MovementPatternRoundAnalyzer(
     const std::vector<CardReference>& references,
-    bool useOrb,
-    bool useBow
-) : classifier_(references, useOrb), references_(references), useBow_(useBow) {
+    bool useOrb
+) : classifier_(references, useOrb), references_(references) {
     orb_ = cv::ORB::create(1000);
     processed_references_ = preprocessReferences(references_, orb_);
 }
@@ -677,94 +682,27 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
     cv::morphologyEx(fmask, fmask, cv::MORPH_CLOSE, closeKernel);
     cv::morphologyEx(smask, smask, cv::MORPH_CLOSE, closeKernel);
 
-    // Feature-based card classification using ORB descriptors and brute-force matching. We compare the extracted card crops against the preprocessed reference cards to predict which card was played.
-    cv::Mat first_card; //used only on else branch, but needed for debug
-    cv::Mat second_card; //used only on else branch, but needed for debug
-    std::optional<CardPrediction> firstPred;
-    std::optional<CardPrediction> secondPred;
-    std::optional<CardPrediction> briscolaPred;
-    
-    if (useBow_) {
-        // On frames part1 and part2 there are multiple cards on the table
-        // (the briscola, and after part1 also the first played card). The
-        // k-means detector picks the largest blob, which would be the
-        // briscola, not the card we are looking for. To disambiguate we
-        // call findBBox with an exclusion mask that hides the cards we
-        // have already identified, so the largest remaining blob is
-        // exactly the card we want.
+    // Blob detection & cropping helper (weighted by proximity to center) : we need to find the card bounding box in the difference mask, and crop it from the original frame. We use a fixed-size crop (400x400) centered on the detected card.
 
-        // find the briscola in the first frame of the round. It
-        // is the only card on the table at that moment, so findBBox
-        // identifies it unambiguously.
-        std::optional<CardBBox> briscolaBox;
-        briscolaBox = briscola::findBBox({video}, 0, 0, debug);
-        if (briscolaBox.has_value()) {
-            std::optional<CardPrediction> briscolaPred = getBoWClassifier().classify(briscolaBox->image, debug);
-        }
-        // bbox->mask is already the card's bounding box expanded by 20%,
-        // filled solid. It is exactly what we want as an exclusion mask:
-        // it covers the briscola (and the first card) with enough margin
-        // that the detector will not pick them up again.
-        cv::Mat excludeMask1;
-        if (briscolaBox.has_value()) {
-            excludeMask1 = briscolaBox->mask;
-        } else {
-            excludeMask1 = cv::Mat::zeros(frame_part1.size(), CV_8UC1);
-        }
+    cv::Mat first_card = extractBestCrop(fmask, frame_part1);
+    cv::Mat second_card = extractBestCrop(smask, frame_part2);
 
-        // find the first card on part1 with the briscola masked out.
-        std::optional<CardBBox> firstBox = briscola::findBBox(
-            {video}, 0, pat.part1_idx, debug, excludeMask1);
-
-        // For the second card, we need to exclude both the briscola and
-        // the first card. We can OR the two masks: bbox->mask is already
-        // the expanded rectangle for each detected card, so the union of
-        // the two is the union of the two exclusion regions.
-        cv::Mat excludeMask2;
-        if (briscolaBox.has_value() && firstBox.has_value()) {
-            cv::bitwise_or(briscolaBox->mask, firstBox->mask, excludeMask2);
-        } else if (briscolaBox.has_value()) {
-            excludeMask2 = briscolaBox->mask;
-        } else if (firstBox.has_value()) {
-            excludeMask2 = firstBox->mask;
-        } else {
-            excludeMask2 = cv::Mat::zeros(frame_part2.size(), CV_8UC1);
-        }
-        std::optional<CardBBox> secondBox = briscola::findBBox(
-            {video}, 0, pat.part2_idx, debug, excludeMask2);
-
-        // classify the two crops. findBBox already prepared the
-        // aligned card image (rotated so the long side is vertical, same
-        // orientation as the reference templates), so we can pass it
-        // directly to the BoW classifier without further preprocessing.
-        if (firstBox.has_value()) {
-            firstPred = getBoWClassifier().classify(firstBox->image, debug);
-        }
-        if (secondBox.has_value()) {
-            secondPred = getBoWClassifier().classify(secondBox->image, debug);
-        }
-    } else {
-        // Blob detection & cropping helper (weighted by proximity to center) : we need to find the card bounding
-        // box in the difference mask, and crop it from the original frame. We use a fixed-size crop (400x400)
-        // centered on the detected card.
-        first_card = extractBestCrop(fmask, frame_part1); 
-        second_card = extractBestCrop(smask, frame_part2);
-        if (first_card.empty() || second_card.empty()) {
-            throw std::runtime_error("failed to isolate card images");
-        }
-
-        std::string s1 = video.stem().string() + "RESIZED";
-        std::string s2 = video.stem().string() + "RESIZED";
-
-        // From the fixed 400x400 crop, refine it to get the best possible card crop, as close as possible to the actual card edges.
-
-        cv::Mat resized_first_card = extractAndNormalizeCard(first_card, debug, s1 );
-        cv::Mat resized_second_card = extractAndNormalizeCard(second_card, debug, s2 );
-
-        firstPred  = featurePatternMatch(resized_first_card,  processed_references_, orb_);
-        secondPred = featurePatternMatch(resized_second_card, processed_references_, orb_);
+    if (first_card.empty() || second_card.empty()) {
+        throw std::runtime_error("failed to isolate card images");
     }
 
+    std::string s1 = video.stem().string() + "RESIZED";
+    std::string s2 = video.stem().string() + "RESIZED";
+
+    // From the fixed 400x400 crop, refine it to get the best possible card crop, as close as possible to the actual card edges.
+
+    cv::Mat resized_first_card = extractAndNormalizeCard(first_card, debug, s1 );
+    cv::Mat resized_second_card = extractAndNormalizeCard(second_card, debug, s2 );
+
+    // EFFICIENCY IMPROVEMENT
+    std::optional<CardPrediction> firstPred  = featurePatternMatch(resized_first_card,  processed_references_, orb_);
+    std::optional<CardPrediction> secondPred = featurePatternMatch(resized_second_card, processed_references_, orb_);
+    
     RoundObservation obs;
     obs.leader = leader;
     if (leader) {
@@ -779,19 +717,15 @@ RoundObservation MovementPatternRoundAnalyzer::analyze(
         obs.northCard = firstPred;
         obs.southCard = secondPred;
     }
-    if(useBow_){
-        obs.briscolaCandidate = briscolaPred;
-    }
+
     if (debug) {
-        if(!useBow_){
-            // 1) first card image
-            std::string s1 = video.stem().string() + "_first_card";
-            debug->publishImage("capture", s1, 0, first_card, true, false);
-            // 2) second card image
-            std::string s2 = video.stem().string() + "_second_card";
-            debug->publishImage("capture", s2, 0, second_card, true, false);
-        }
-        
+        // Publish exactly these images in the requested order:
+        // 1) first card image
+        std::string s1 = video.stem().string() + "_first_card";
+        debug->publishImage("capture", s1, 0, first_card, true, false);
+        // 2) second card image
+        std::string s2 = video.stem().string() + "_second_card";
+        debug->publishImage("capture", s2, 0, second_card, true, false);
         // 3) first frame (baseline A)
         std::string s3 = video.stem().string() + "_first_frame";
         debug->publishImage("capture", s3, 0, first_frame, true, false);

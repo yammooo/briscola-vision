@@ -25,8 +25,7 @@ class MovementPatternRoundAnalyzer final : public IRoundAnalyzer {
 public:
     explicit MovementPatternRoundAnalyzer(
         const std::vector<CardReference>& references,
-        bool useOrb = false,
-        bool useBow = false
+        bool useOrb = false
     );
 
     RoundObservation analyze(
@@ -37,7 +36,6 @@ public:
 private:
     SiftCardClassifier classifier_;
     std::vector<CardReference> references_;
-    bool useBow_ = false;
 
     // EFFICIENCY IMPROVEMENT
     cv::Ptr<cv::ORB> orb_;
