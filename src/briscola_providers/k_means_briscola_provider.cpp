@@ -253,7 +253,8 @@ namespace briscola {
         const std::vector<std::filesystem::path>& path, //path of every ROUND
         int round,
         int frameIndex, //frame of the round to observe
-        DebugSink* debug
+        DebugSink* debug,
+        const cv::Mat& excludeMask
     ) {
         cv::VideoCapture cap(path[round].string());
         if (!cap.isOpened()) {
@@ -457,6 +458,17 @@ namespace briscola {
                     }
                 }
             }
+
+            // Exclude the pixels the caller asked to ignore. The mask is
+            // used by the MovementPattern analyzer to hide the briscola
+            // (and the first card) when searching for the second card on
+            // the same frame: without it, the largest blob would be the
+            // briscola, not the card we are looking for. The exclusion is
+            // applied after k-means, not before, so the clustering is not
+            // disturbed by the artificially masked region.
+            if (!excludeMask.empty()) {
+                binaryMask.setTo(0, excludeMask);
+            }
             //for debug
             binaryRaw = binaryMask.clone();
 
@@ -630,6 +642,7 @@ namespace briscola {
                 cv::rectangle(frame, expanded, cv::Scalar(0, 255, 0), 2);
             }
         }
+
         if (debug) {
             KMeansDebugData debugData = {
                 frame,
@@ -649,7 +662,39 @@ namespace briscola {
         if (bestBlobLabel < 0) {
             return std::nullopt;
         }
+        // Build the aligned crop of the card: rotate the frame by the
+        // rotatedRect's angle so the card becomes axis-aligned, then extract
+        // the rectangle that bounds it. The result is a BGR image with the
+        // card's long side vertical, matching the orientation of the reference
+        // templates.
+        cv::Mat cardImage;
+        if (bestBlobLabel >= 0) {
+            double angle = bestRotatedRect.angle;
+            double w = bestRotatedRect.size.width;
+            double h = bestRotatedRect.size.height;
 
+            // Bring the long side vertical.
+            if (w > h) {
+                std::swap(w, h);
+                angle += 90.0;
+            }
+
+            cv::Mat rotatedFrame;
+            cv::Mat rotMat = cv::getRotationMatrix2D(bestRotatedRect.center, angle, 1.0);
+            cv::warpAffine(frame, rotatedFrame, rotMat, frame.size(), cv::INTER_LINEAR);
+
+            cv::Rect axisAligned(
+                static_cast<int>(std::round(bestRotatedRect.center.x - w / 2.0f)),
+                static_cast<int>(std::round(bestRotatedRect.center.y - h / 2.0f)),
+                static_cast<int>(std::round(w)),
+                static_cast<int>(std::round(h))
+            );
+
+            axisAligned &= cv::Rect(0, 0, rotatedFrame.cols, rotatedFrame.rows);
+            if (axisAligned.width > 0 && axisAligned.height > 0) {
+                cardImage = rotatedFrame(axisAligned).clone();
+            }
+        }
         // Build the result. rect and rotatedRect describe the card's
         // geometry; mask is the expanded rectangle used by the caller
         // to inhibit the card before the next detection. mask is cloned
@@ -658,6 +703,7 @@ namespace briscola {
         result.rect = boundingBox;
         result.mask = cardMask.clone();
         result.rotatedRect = bestRotatedRect;
+        result.image = cardImage;
         return result;
     }
     
@@ -689,63 +735,24 @@ namespace briscola {
             }
         }
 
-        // Re-open the video and re-read the exact frame where the bbox was
-        // found. findBBox does not return the frame itself, so the frame must
-        // be re-read here for the crop. Re-opening is simpler than carrying
-        // the frame out of findBBox, at the cost of a second decode of the
-        // same frame.
-        cv::VideoCapture cap(path[foundRound].string());
-        if (!cap.isOpened()) {
-            throw std::runtime_error("Cannot open video: " + path[foundRound].string());
-        }
-        cv::Mat frame;
-        cap.set(cv::CAP_PROP_POS_FRAMES, foundFrame);
-        if (!cap.read(frame)) {
-            throw std::runtime_error("Cannot re-read frame for cropping: " + path[foundRound].string());
-        }
-
-        // Align the card to the axes using the rotated rect from findBBox.
-        // minAreaRect returns the rect with the long side as "width" or
-        // "height" depending on its angle convention, so if width > height
-        // we swap them and add 90° to bring the long side vertical, matching
-        // the template orientation (cards are vertical).
-        const cv::RotatedRect& rr = bbox->rotatedRect;
-        double angle = rr.angle;
-        double w = rr.size.width;
-        double h = rr.size.height;
-
-        if (w > h) {
-            std::swap(w, h);
-            angle += 90.0;
-        }
-        cv::Mat rotatedFrame;
-        cv::Mat rotMat = cv::getRotationMatrix2D(rr.center, angle, 1.0);
-        cv::warpAffine(frame, rotatedFrame, rotMat, frame.size(), cv::INTER_LINEAR);
-
-        // In the rotated frame the rect is axis-aligned, centered at the same
-        // center, with dimensions (w, h). Clip to the image bounds because the
-        // rotation can push part of the rect outside the original frame.
-        cv::Rect axisAligned(
-            static_cast<int>(std::round(rr.center.x - w / 2.0f)),
-            static_cast<int>(std::round(rr.center.y - h / 2.0f)),
-            static_cast<int>(std::round(w)),
-            static_cast<int>(std::round(h))
-        );
-
-        axisAligned &= cv::Rect(0, 0, rotatedFrame.cols, rotatedFrame.rows);
-        if (axisAligned.width <= 0 || axisAligned.height <= 0) {
-            return std::nullopt;
-        }
-        // Crop the card from the rotated frame and classify it. The crop is
-        // already axis-aligned (the rotation above brought the card vertical),
-        // so it can be fed to BoVW without further preprocessing.
-        cv::Mat cropped = rotatedFrame(axisAligned).clone();
+        const cv::Mat& cropped = bbox->image;
         const std::optional<Card> card = getBoWClassifier().classify(cropped, debug);
 
         // Debug: log the rotated rect (for verifying the rotation) and publish
         // an overlay with the rotated rect drawn on the frame and the
         // recognized card name above it.
         if (debug) {
+            // Re-open the video to draw the debug overlay. We need the full frame,
+            // not just the crop, to show the rotatedRect in context.
+            cv::VideoCapture cap(path[foundRound].string());
+            if (!cap.isOpened()) {
+                throw std::runtime_error("Cannot open video: " + path[foundRound].string());
+            }
+            cv::Mat frame;
+            cap.set(cv::CAP_PROP_POS_FRAMES, foundFrame);
+            if (!cap.read(frame)) {
+                throw std::runtime_error("Cannot re-read frame for debug: " + path[foundRound].string());
+            }
             // Console log: rect geometry and final crop size.
             std::cout << "BoW debug: rotatedRect center=(" << bbox->rotatedRect.center.x
                     << "," << bbox->rotatedRect.center.y << ")"

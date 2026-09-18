@@ -88,21 +88,6 @@ public:
     std::size_t histogramCount() const;
 
 private:
-private:
-    /// @brief Classifies one orientation of a crop and returns both the
-    /// best-matching card and the chi-square distance to it. Used by
-    /// classify() to compare the upright and the 180°-rotated crops and
-    /// keep the closer match.
-    ///
-    /// @param cropped  BGR image containing a single card.
-    /// @param debug    Debug sink, or nullptr.
-    /// @return The best Card and its distance, or std::nullopt if no
-    ///         descriptors were extracted or the classifier is not ready.
-    std::optional<std::pair<Card, double>> classifySingle(
-        const cv::Mat& cropped,
-        DebugSink* debug
-    ) const;
-
     cv::Ptr<cv::Feature2D> detector_ = cv::SIFT::create();
 
     cv::Mat vocabulary_;                    ///< (K x D) CV_32F, one row per word.

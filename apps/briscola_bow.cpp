@@ -7,6 +7,7 @@
 ///
 /// Usage:
 ///   briscola_bow <roundVideosFolder> [--debug-window] [--debug-dir DIR]
+
 #include "briscola/briscola_providers/k_means_briscola_provider.hpp"
 #include "briscola/debug.hpp"
 
