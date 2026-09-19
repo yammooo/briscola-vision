@@ -69,7 +69,6 @@ By taking the difference between the very first frame and the frame after the fi
 The pipeline relies on the assumption that **each player's hand fully retreats before the other player acts or before the cards are collected**. This assumption fails in game 3, where players sometimes pick up the cards while the second hand is still retreating, or the winner enters the frame before a stable still moment is reached. In those cases, `frame_part1` or `frame_part2` may not land on a clean card-only frame, leading to wrong crops that contain only hands or arms.  Games 1, 2, and 4 respect the assumption well and the pipeline performs significantly better on them.
 
 Use this pipeline when speed matters and game footage follows a clear play-and-retreat pattern. Use YOLO/SIFT when maximum accuracy is the priority, and when the play and retreat pattern is ot followed.
-
 ## K-Means + BoVW pipeline
 
 This pipeline was built to explore how far a fully classical, non-neural, non-SIFT approach could go on the same task. The goal was not to beat the YOLO/local-feature or movement-pattern pipelines, but to map the boundary of a bag-of-visual-words classifier on the specific conditions of this dataset: a card lying on a checked tablecloth, often partially covered by another card, filmed from a fixed camera.
@@ -82,21 +81,22 @@ Recognition is delegated to a Bag of Visual Words classifier. A vocabulary of K 
 
 ### How it works
 
-**Bounding box** (`KMeansBriscolaProvider::findBBox`): a Gaussian blur (81x81) suppresses the checkerboard, a local variance map (21x21 window) isolates spatially uniform regions, and K-Means (K=6, table = 5 largest clusters) segments the blurred frame. The brightest foreground cluster is assumed to be the card face. The mask is intersected with the uniform-region mask, the largest blob is kept, closed with a 21x21 rectangle kernel to seal the holes left by the printed figures, and its outer contour is flood-filled. Each filled blob is scored on five geometric properties (area, aspect ratio, extent, solidity, rectangularity); the highest-scoring accepted blob becomes the card. Both the axis-aligned bbox and the rotated `minAreaRect` are returned, along with an already-rotated card crop and a silhouette mask used for inhibition.
+**Bounding box** (`KMeansBriscolaProvider::findBBox`): a Gaussian blur (81x81) suppresses the checkerboard, a local variance map (21x21 window) isolates spatially uniform regions, and K-Means (K=6, table = 3 largest clusters) segments the blurred frame. The brightest foreground cluster is assumed to be the card face. To recover fragmented regions caused by card figures, the mask undergoes mass morphological operations (heavy dilation followed by erosion). The largest blob is evaluated on five geometric properties, and its total combined score must pass a strict global threshold (>= 2.1) to ensure the blob is an actual card and not a false positive like a player's hand or a shadow. The oriented bounding box (`minAreaRect`) is computed and then padded mathematically by 8% to capture the physical card edges and provide a robust, context-rich crop for the classifier.
 
-**Recognition** (`BoWClassifier`): the training set is the 40 reference cards, each expanded into a set of augmented variants. The augmentation covers rotations (including 180° for upside-down cards), illumination changes, scaling, blur, and partial occlusions. The occlusions are produced by cropping the card to a fraction of its area (40%–90% visible, centered). SIFT descriptors are extracted from every variant and clustered into K=800 visual words with k-means. Each variant produces one reference histogram of size K. At query time, the crop is aligned to the axes using the rotated rect, SIFT descriptors are extracted, the query histogram is built the same way, and the best match is chosen by chi-square distance over all reference histograms.
+**Recognition** (`BoWClassifier`): the training set is the 40 reference cards, each expanded into a set of augmented variants. The augmentation covers rotations (including 180° for upside-down cards), illumination changes, scaling, blur, and partial occlusions. The occlusions are produced by cropping the card to a fraction of its area (40%–90% visible, centered). SIFT descriptors are extracted from every variant and clustered into K=800 visual words with k-means. Each variant produces one reference histogram of size K. At query time, the crop is aligned to the axes using the rotated rect, SIFT descriptors are extracted, the query histogram is built, and the best match is chosen by chi-square distance over all reference histograms in a single, highly efficient pass (since the vocabulary is already rotation-aware).
 
-**Pipeline integration**: `KMeansBriscolaProvider::find` scans up to 30 frames per round, calls `findBBox` on each, and on the first successful detection classifies the aligned crop. The provider is a drop-in implementation of `IBriscolaProvider`.
+**Pipeline integration**: `KMeansBriscolaProvider::find` scans up to 60 frames per round, calls `findBBox` on each, and on the first successful detection classifies the aligned crop. The provider is a drop-in implementation of `IBriscolaProvider`.
 
-**Round analysis** (`MovementPatternRoundAnalyzer`, `--bow` flag): the same BoW classifier can replace the built-in template matcher inside the movement-pattern analyzer. The analyzer's scheduling logic (motion detection, three-frame selection, leader inference) is reused unchanged; only the recognition step is swapped. Because the frames selected by the movement analyzer contain multiple cards (the briscola and the played cards), `findBBox` is called with an exclusion mask that hides the cards already identified, so the largest remaining blob is the card we are looking for. The mask is the expanded bounding box returned by the previous `findBBox` call, so no extra geometry is computed.
+**Round analysis** (`KMeansBowRoundAnalyzer`, `--bow` flag): the BoW classifier replaces the built-in template matcher inside the movement-pattern analyzer. Because the frames selected by the movement analyzer contain multiple cards (the briscola and the played cards), `findBBox` is guided by a Dynamic Temporal Mask. By computing the absolute difference (`absdiff`) between a reference background frame (just before the player moves) and the action frame, the pipeline isolates the exact region of new movement. K-Means only searches inside this motion window, ignoring the briscola and any overlapping previously played cards. To ensure stability against transient noise (e.g., a lingering hand), the pipeline uses a Multi-frame Search Window, scanning up to 5 consecutive frames and locking onto the first geometrically perfect card.
 
 ### Strengths
 
 - **No neural network, no training data, no GPU**: only OpenCV and the 40 reference scans.
 - **Deterministic**: apart from k-means seeding (fixed at 42 for reproducibility) and the SIFT keypoint selection, the pipeline is fully deterministic.
 - **Vocabulary size has an empirical sweet spot**: with 40 cards and many augmented variants, K=800 gave the best trade-off; smaller K collapsed the vocabulary onto itself, larger K overfits.
-- **Robust to upside-down cards**: the training set includes 180°-rotated variants and the query classification tests both orientations, so cards played by the player sitting opposite the camera are handled correctly.
-- **Provider and analyzer are decoupled**: the same BoW classifier works both as a briscola provider (single card in the frame) and as a round-analyzer classifier (multiple cards, with inhibition).
+- **Robust to upside-down cards and lighting**: the training set includes 180°-rotated and illumination-altered variants. Query classification requires only a single pass to reliably match cards played by the opposite player under varying table conditions.
+- **Robust to overlapping cards**: Dynamic temporal masking isolates the newly played card based strictly on movement, even if it lands exactly on top of a previously played card.
+- **Provider and analyzer are decoupled**: the same BoW classifier works both as a briscola provider (single card in the frame) and as a round-analyzer classifier (multiple cards, with temporal inhibition).
 
 ### Weaknesses and known failure mode
 
@@ -155,17 +155,14 @@ mkdir -p models/bow
     data/game3 data/game3resultsCORRECTED.csv \
     data/game4 data/game4resultsCORRECTED.csv
 ```
-
-### Full test script
+## Full test script
 
 The commands above can be run in sequence to build the project, train the
 vocabulary from scratch, and run every check on the four provided games.
-The script writes the two evaluation reports to `/tmp/baseline.txt` and
-`/tmp/bow.txt` and prints their summaries side by side, so the two
+The script writes the two evaluation reports to /tmp/baseline.txt and
+/tmp/bow.txt and prints their summaries side by side, so the two
 pipelines can be compared at a glance.
-
-```bash
-#!/bin/bash
+```sh
 set -e
 
 echo "=== 0. Build ==="
@@ -197,12 +194,6 @@ echo "=== 5. Evaluation BoW ==="
 
 echo "=== Done ==="
 ```
-
-The training step (step 1) only needs to be re-run when the training set
-changes (new reference scans, different augmentation, different K). For
-repeated test runs on an unchanged training set, the script can be started
-from step 2.
-
 ## Build
 
 Install OpenCV. On Fedora:
