@@ -248,7 +248,31 @@ cv::Mat renderSignalPlot(
 
     return plot;
 }
+/**
+ * @brief Transforms a visible difference image into an exclude mask for findBBox.
+ *        findBBox expects an excludeMask where 255 means "ignore this pixel".
+ */
+cv::Mat createMotionExcludeMask(const cv::Mat& diff) {
+    cv::Mat gray, mask;
+    cv::cvtColor(diff, gray, cv::COLOR_BGR2GRAY);
 
+    // Isolates pixels that changed radically
+    cv::threshold(gray, mask, 30, 255, cv::THRESH_BINARY);
+
+    // Noise cleanup
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(9, 9));
+    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+    cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
+
+    // Dilation to give K-means room to find the full card 
+    cv::dilate(mask, mask, kernel, cv::Point(-1, -1), 4);
+    
+    // Invert the mask: 0 becomes 255 (ignore), 255 becomes 0 (analyze)
+    cv::Mat excludeMask;
+    cv::bitwise_not(mask, excludeMask);
+    
+    return excludeMask;
+}
 } // anonymous namespace
 
 KMeansBowRoundAnalyzer::KMeansBowRoundAnalyzer(
@@ -343,29 +367,6 @@ RoundObservation KMeansBowRoundAnalyzer::analyze(
 
     // Difference among card 2 played frame and card 1
     cv::absdiff(frame_part2, frame_part1, second_diff);
-
-    // Lambda to trasform visible difference in an exclude mask
-    auto createMotionExcludeMask = [](const cv::Mat& diff) {
-        cv::Mat gray, mask;
-        cv::cvtColor(diff, gray, cv::COLOR_BGR2GRAY);
-
-        // Idolates pixels that changed radically
-        cv::threshold(gray, mask, 30, 255, cv::THRESH_BINARY);
-
-        // Noise cleanup
-        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(9, 9));
-        cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
-        cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
-        
-
-        // Dilation to give K-means room to find the full card 
-        cv::dilate(mask, mask, kernel, cv::Point(-1, -1), 4);
-        
-        // findBBox expects an excludeMask with 255 =  "ignore".
-        cv::Mat excludeMask;
-        cv::bitwise_not(mask, excludeMask);
-        return excludeMask;
-    };
 
     cv::Mat excludeMask1 = createMotionExcludeMask(first_diff);
     cv::Mat excludeMask2 = createMotionExcludeMask(second_diff);
