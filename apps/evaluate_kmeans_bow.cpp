@@ -1,12 +1,11 @@
-// evaluate_kmeans_bow.cpp
-//
-// Runs KMeansBowRoundAnalyzer + KMeansBriscolaProvider on one or
-// more game folders, compares each prediction to its own ground truth CSV
-// and prints a detailed per-round table plus aggregate metrics.
-//
-// Usage:
-//   evaluate_kmeans_bow CARD_REFS GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]
-
+/**
+ * @brief KMeansBowRoundAnalyzer + KMeansBriscolaProvider on one or
+ * more game folders, compares each prediction to its own ground truth CSV
+ * and prints a detailed per-round table plus aggregate metrics.
+ *
+ * Usage:
+ *   evaluate_kmeans_bow CARD_REFS GAME_FOLDER1 CSV1 [GAME_FOLDER2 CSV2 ...]
+ */
 #include "briscola/briscola_providers/k_means_briscola_provider.hpp"
 #include "briscola/evaluation.hpp"
 #include "briscola/game.hpp"

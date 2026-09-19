@@ -63,8 +63,9 @@ cv::Mat scaleCard(const cv::Mat& src, double scale) {
     resized(srcRoi).copyTo(out(dstRoi));
     return out;
 }
-
-/// @brief Applies a light Gaussian blur.
+/**
+ * @brief Applies a light Gaussian blur.
+ */
 cv::Mat blurCard(const cv::Mat& src, int ksize) {
     cv::Mat out;
     if (ksize % 2 == 0) ksize++;
@@ -683,40 +684,45 @@ std::optional<CardPrediction> BoWClassifier::classify(
 }
 
 //######################### HELPERS #########################
-/// @brief Returns the number of visual words (K) in the vocabulary.
-///
-/// The value is set by train() (and by load()) and is stable thereafter.
-/// It is exposed for two reasons:
-///   - debug and logging: callers can print the vocabulary size without
-///     knowing the internal field name;
-///   - external sizing: a caller that builds its own histogram (e.g. for
-///     comparison or for a custom metric) needs K to size the BoW part
-///     consistently with the classifier's own histograms.
-/// Returns 0 if the classifier has never been trained and no vocabulary
-/// has been loaded, which is consistent with isReady() returning false
-/// in that state.
+/**
+ * @brief Returns the number of visual words (K) in the vocabulary.
+ *
+ * The value is set by train() (and by load()) and is stable thereafter.
+ * It is exposed for two reasons:
+ *   - debug and logging: callers can print the vocabulary size without
+ *     knowing the internal field name;
+ *   - external sizing: a caller that builds its own histogram (e.g. for
+ *     comparison or for a custom metric) needs K to size the BoW part
+ *     consistently with the classifier's own histograms.
+ * Returns 0 if the classifier has never been trained and no vocabulary
+ * has been loaded, which is consistent with isReady() returning false
+ * in that state.
+ */
 int BoWClassifier::vocabularySize() const {
     return vocabularySize_;
 }
-
-/// @brief Returns the number of reference histograms currently stored.
-///
-/// After train(), this equals the total number of augmented variants that
-/// produced at least one descriptor: 40 cards × N variants each, minus the
-/// variants that yielded no descriptors (which are skipped during training).
-/// After load(), it equals the count stored in the histograms file.
-/// Exposed for the same reasons as vocabularySize(): debug output and
-/// external sizing logic. A caller that builds a parallel data structure
-/// indexed by the same template ids needs the size.
-/// Returns 0 if the classifier has never been trained and no histograms
-/// have been loaded, which is consistent with isReady() returning false
-/// in that state.
+/**
+ * @brief Returns the number of reference histograms currently stored.
+ *
+ * After train(), this equals the total number of augmented variants that
+ * produced at least one descriptor: 40 cards × N variants each, minus the
+ * variants that yielded no descriptors (which are skipped during training).
+ * After load(), it equals the count stored in the histograms file.
+ * Exposed for the same reasons as vocabularySize(): debug output and
+ * external sizing logic. A caller that builds a parallel data structure
+ * indexed by the same template ids needs the size.
+ * Returns 0 if the classifier has never been trained and no histograms
+ * have been loaded, which is consistent with isReady() returning false
+ * in that state.
+ */
 std::size_t BoWClassifier::histogramCount() const {
     return histograms_.size();
 }
-/// @brief Lazily loads the BoW classifier from disk on first use.
-/// Training is done offline by the bow_train binary; at query time we only
-/// load the vocabulary and the template histograms.
+/**
+ * @brief Lazily loads the BoW classifier from disk on first use.
+ * Training is done offline by the bow_train binary; at query time we only
+ * load the vocabulary and the template histograms.
+ */
 BoWClassifier& getBoWClassifier() {
     static BoWClassifier bow;
     static bool loaded = false;

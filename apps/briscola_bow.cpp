@@ -1,13 +1,14 @@
-/// @brief Smoke test for the BoVW-based KMeansBriscolaProvider.
-///
-/// Runs the provider on the first video of a folder and prints the
-/// recognized briscola. This binary exists only to exercise the provider
-/// end-to-end without pulling in the RoundAnalyzer machinery (which
-/// expects a full round, three cards, movement patterns, and so on).
-///
-/// Usage:
-///   briscola_bow <roundVideosFolder> [--debug-window] [--debug-dir DIR]
-
+/** 
+ * @brief Smoke test for the BoVW-based KMeansBriscolaProvider.
+ *
+ * Runs the provider on the first video of a folder and prints the
+ * recognized briscola. This binary exists only to exercise the provider
+ * end-to-end without pulling in the RoundAnalyzer machinery (which
+ * expects a full round, three cards, movement patterns, and so on).
+ *
+ * Usage:
+ *   briscola_bow <roundVideosFolder> [--debug-window] [--debug-dir DIR]
+ */
 #include "briscola/briscola_providers/k_means_briscola_provider.hpp"
 #include "briscola/debug.hpp"
 

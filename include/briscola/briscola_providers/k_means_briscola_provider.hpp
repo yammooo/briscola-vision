@@ -19,8 +19,8 @@ namespace briscola {
  * classifier without further preprocessing.
  */
 struct CardBBox {
-    cv::Rect rect;  ///< Bounding box in image coordinates.
-    cv::Mat mask;   ///< Binary silhouette (CV_8UC1, 255 on card pixels).
+    cv::Rect rect;  // Bounding box in image coordinates.
+    cv::Mat mask;   //  Binary silhouette (CV_8UC1, 255 on card pixels).
     cv::RotatedRect rotatedRect;///Rotated rect around the card
     cv::Mat image; //card crop, rotated and axis aligned
     double score;

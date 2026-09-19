@@ -56,14 +56,14 @@ namespace briscola {
      * is null the struct is never constructed.
      */
     struct KMeansDebugData {
-        const cv::Mat& frame; /// Original unmodified frame, visual reference.
-        const cv::Mat& binaryRaw; /// Binary mask of the candidate cluster straight out of K-Means.
-        const cv::Mat& cardMask; /// Final binary mask after morphological closing and contour fill.
-        const std::vector<BlobScore>& blobScores; /// One entry per blob evaluated by scoreCardBlob, including rejected ones.
-        int bestBlobLabel; /// Label of the winning blob, or -1 if no blob passed the thresholds.
-        double bestBlobScore; ///< Geometric score of the winning blob, in [0, 1].
-        std::filesystem::path roundPath; /// Path of the video file for this round
-        cv::Rect boundingBox; ///  bounding box of the detected card in image coordinates. (0,0,0,0) if no BBox
+        const cv::Mat& frame; // Original unmodified frame, visual reference.
+        const cv::Mat& binaryRaw; // Binary mask of the candidate cluster straight out of K-Means.
+        const cv::Mat& cardMask; // Final binary mask after morphological closing and contour fill.
+        const std::vector<BlobScore>& blobScores; // One entry per blob evaluated by scoreCardBlob, including rejected ones.
+        int bestBlobLabel; // Label of the winning blob, or -1 if no blob passed the thresholds.
+        double bestBlobScore; // Geometric score of the winning blob, in [0, 1].
+        std::filesystem::path roundPath; // Path of the video file for this round
+        cv::Rect boundingBox; //  bounding box of the detected card in image coordinates. (0,0,0,0) if no BBox
     };
 
     /**
@@ -224,15 +224,17 @@ namespace briscola {
         debug->publishImage("kmeans_original_frame",
             d.roundPath.stem().string(), 0, d.frame);
 
-        // 2. Maschera grezza del cluster candidato — cosa vede K-Means
+        // Raw candidate mask
         debug->publishImage("kmeans_binary_raw",
             d.roundPath.stem().string(), 0, d.binaryRaw);
 
-        // 3. Maschera finale dopo closing + fill — input a scoreCardBlob
+        
+        // Mask after closing + fill
         debug->publishImage("kmeans_card_mask",
             d.roundPath.stem().string(), 0, d.cardMask);
 
-        // 4. Frame originale con bounding box sovrapposta — risultato finale
+        
+        //final result
         cv::Mat bboxOverlay;
         d.frame.copyTo(bboxOverlay);
         if (d.boundingBox.width > 0 && d.boundingBox.height > 0) {
@@ -249,7 +251,7 @@ namespace briscola {
         debug->publishImage("kmeans_card_bbox",
             d.roundPath.stem().string(), 0, bboxOverlay);
 
-        // 5. Score di ogni blob — unica fonte numerica per diagnosticare casi limite
+        // Blob scores
         std::string blobReport;
         blobReport += cv::format("Best blob label=%d  score=%.3f\n",
             d.bestBlobLabel, d.bestBlobScore);
@@ -502,61 +504,32 @@ namespace briscola {
             
             cv::bitwise_and(binaryMask, uniformMask, binaryMask);
 
-            //i noticed that cards with large figures tend to segment in 2-3 compoents. 
-            //this helps to mitigate
-            // INVECE DI QUESTO:
-            // cv::Mat dilatedMask;
-            // cv::Mat dilateKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(31, 31));
-            // cv::dilate(binaryMask, dilatedMask, dilateKernel);
-
+            
             cv::Mat mergedMask;
 
-            // Usiamo un kernel rettangolare. MORPH_RECT è cruciale per le carte 
-            // perché aiuta a preservare gli angoli retti della BBox, a differenza di MORPH_ELLIPSE.
+            // rectangolar kernel
             cv::Mat morphKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(15, 15));
 
-            // Questo è il tuo "Loop". Quante volte espandere e poi ritrarre.
-            // Più è alto, più gap giganteschi riuscirà a chiudere. 
-            // Parti da 4 o 5, se la carta è ancora spezzata, alza il numero.
+            // Strengh of the closing
             int strength = 5; 
 
-            // 1. DILATAZIONE MASSIVA (Espansione)
-            // I frammenti della carta si gonfiano fino a scontrarsi e fondersi in un unico blob gigante.
+            // Dilation
             cv::dilate(binaryMask, mergedMask, morphKernel, cv::Point(-1, -1), strength);
 
-            // 2. CONTRAZIONE MASSIVA (Erosione)
-            // Ritira i bordi esterni per riportare la carta alle sue dimensioni originali.
-            // Il trucco magico è che i "buchi" interni ormai collassati durante la dilatazione 
-            // non si riaprono, lasciando un blob solido.
+            // Contraption
             cv::erode(mergedMask, mergedMask, morphKernel, cv::Point(-1, -1), strength);
 
-            // (Opzionale) A questo punto potresti avere ancora dei buchetti molto piccoli all'interno
-            // che non alterano la BBox ma danno fastidio. Un semplice findContours con FILLED li annienta:
+            // After closing small holes might survive: findcontours with filled
             std::vector<std::vector<cv::Point>> contours;
             cv::findContours(mergedMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
             mergedMask = cv::Mat::zeros(mergedMask.size(), CV_8UC1);
             cv::drawContours(mergedMask, contours, -1, cv::Scalar(255), cv::FILLED);
 
-            // Ora passa 'mergedMask' al tuo connectedComponentsWithStats
             cv::Mat ccLabels, ccStats, ccCentroids;
             const int ccNum = cv::connectedComponentsWithStats(
                 mergedMask, ccLabels, ccStats, ccCentroids, 8, CV_32S
             );
-            // Run connected components on the binary candidate mask to separate it into
-            // individual blobs. Each contiguous group of white pixels becomes one labeled
-            // region. We use 8-connectivity so that diagonally touching pixels are
-            // considered part of the same blob.
-            // CV_32S is required for the label matrix because the number of blobs can
-            // exceed the 255 limit of CV_8U on high-resolution frames with a fragmented
-            // candidate mask. ccStats gives us area, bounding box, and centroid for each
-            // blob without having to iterate the label matrix ourselves, which is why we
-            // prefer connectedComponentsWithStats over the plain connectedComponents.
-            /*
-            cv::Mat ccLabels, ccStats, ccCentroids;
-            const int ccNum = cv::connectedComponentsWithStats(
-                dilatedMask, ccLabels, ccStats, ccCentroids, 8, CV_32S
-            );
-            */
+            
             
             // Pick the largest blob above a minimum area.
             // The candidate mask is dominated by the card, but still
@@ -945,7 +918,7 @@ namespace briscola {
         const std::optional<CardPrediction> prediction =
         runBriscolaDetection(path, debug);
         if (!prediction.has_value()) {
-            
+            return std::nullopt;
         }
         return prediction->card;
     } 

@@ -13,24 +13,25 @@
 #include "briscola/pipeline.hpp"   
 
 namespace briscola {
-
-/// @brief Bag of Visual Words classifier for Briscola cards.
-///
-/// Pipeline:
-///   TRAIN:
-///     1. Extract SIFT descriptors from every template in templatesDir.
-///     2. Concatenate all descriptors and run k-means to build a visual
-///        vocabulary of `vocabularySize` words.
-///     3. For each template, quantize its descriptors against the vocabulary
-///        and build a normalized histogram over the K words.
-///   CLASSIFY:
-///     1. Extract SIFT descriptors from the query crop.
-///     2. Quantize against the vocabulary and build a normalized histogram.
-///     3. Output the best match
-///
-/// The vocabulary and the template histograms are the only state needed at
-/// query time. Both can be saved to disk after training and reloaded at
-/// startup, so the expensive k-means step runs only once.
+/**
+ * @brief Bag of Visual Words classifier for Briscola cards.
+ *
+ * Pipeline:
+ *   TRAIN:
+ *     1. Extract SIFT descriptors from every template in templatesDir.
+ *     2. Concatenate all descriptors and run k-means to build a visual
+ *        vocabulary of `vocabularySize` words.
+ *     3. For each template, quantize its descriptors against the vocabulary
+ *        and build a normalized histogram over the K words.
+ *   CLASSIFY:
+ *     1. Extract SIFT descriptors from the query crop.
+ *     2. Quantize against the vocabulary and build a normalized histogram.
+ *     3. Output the best match
+ *
+ * The vocabulary and the template histograms are the only state needed at
+ * query time. Both can be saved to disk after training and reloaded at
+ * startup, so the expensive k-means step runs only once.
+ */
 class BoWClassifier {
 public:
     /**
@@ -198,9 +199,9 @@ public:
 private:
     cv::Ptr<cv::Feature2D> detector_ = cv::SIFT::create();
     
-    cv::Mat vocabulary_;                    ///< (K x D) CV_32F, one row per word.
-    std::vector<cv::Mat> histograms_;       ///< One (1 x K) CV_32F per template.
-    std::vector<Card> labels_;              ///< Card identity for each histogram.
+    cv::Mat vocabulary_; //(K x D) CV_32F, one row per word.
+    std::vector<cv::Mat> histograms_; // One (1 x K) CV_32F per template.
+    std::vector<Card> labels_; // Card identity for each histogram.
     int vocabularySize_ = 0;
     
 };
