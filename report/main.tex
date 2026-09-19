@@ -4,8 +4,8 @@
 \graphicspath{{images/}{report/images/}}
 
 \title{Briscola Vision}
-\author{Group members: \texttt{TODO}}
-\date{\texttt{TODO}}
+\author{Group members: \\ Frigo Gianmaria, Naldoni Martina, Pinton Mattia}
+\date{\texttt{19/09/2026}}
 
 \begin{document}
 
@@ -88,6 +88,13 @@ area visible to be labelled, but its label still covers the whole physical card
 when part of it is hidden. This gives a stable shape for rectification when
 cards overlap or are cropped.
 
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.72\linewidth]{yolo-training-example.jpg}
+    \caption{Example of a synthetic training image.}
+    \label{fig:yolo-training-example}
+\end{figure}
+
 \subsubsection{Card classification}
 
 We warp each oriented box to the same shape as the reference scans, 581
@@ -140,7 +147,6 @@ references, so feature extraction, mask creation, and brute-force matching take
 most of the time. The pipeline is not real-time, but real-time use is not the
 goal of this project.
 
-\subsection{Other pipelines}
 
 \subsection{K-Means and Bag-of-Visual-Words pipeline}
 
@@ -238,7 +244,7 @@ perfect card.
 The briscola card was recovered correctly on all four provided games. The
 played-card classification is around 40\% - 45\% across the four games.
 
-The failure mode is systematic and intrinsic to the bag-of-words paradigm. A
+The failure is systematic and comes from the BoW method. A
 card whose visible face shows fewer symbols than the real card (four denari
 visible on a six-coins, five spade tips visible on a four-spades) is
 misclassified toward the visually present rank, because the histogram loses
@@ -276,6 +282,38 @@ wrong rank; it therefore did not affect any round winner, score, or final game
 result.
 
 % Discuss only observed errors and the relevant speed/accuracy trade-offs.
+
+\clearpage
+\section{Contributions and working hours}
+
+All group members contributed to the initial ideation and to defining the
+shared project architecture. The remaining individual contributions and hours
+will be completed before delivery.
+
+\begin{table}[h]
+    \centering
+    \small
+    \begin{tabular}{p{0.21\linewidth} p{0.59\linewidth} c}
+        \hline
+        Member & Contribution & Hours \\
+        \hline
+        Gianmaria Frigo & Shared ideation and architecture. Base C++
+        architecture and common code: game orchestration, rules, I/O,
+        evaluation, debugging, and CMake integration. Full YOLO and
+        local-feature pipeline: synthetic dataset, model training and export,
+        OpenCV inference, classification, temporal aggregation, tests, and
+        performance measurements. & \texttt{50} \\
+        Martina Naldoni & Shared ideation and architecture. Individual
+        implementation, tests, and performance measurements: \texttt{TODO}. &
+        \texttt{TODO} \\
+        Mattia Pinton & Shared ideation and architecture. Individual
+        implementation, tests, and performance measurements: \texttt{TODO}. &
+        \texttt{TODO} \\
+        \hline
+    \end{tabular}
+    \caption{Group contributions and working hours.}
+    \label{tab:contributions}
+\end{table}
 
 \section{Conclusion}
 
