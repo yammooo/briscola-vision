@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_IO_HPP
 #define BRISCOLA_IO_HPP
 
-/** @file io.hpp @brief Project file input and output. */
+/** @file io.hpp @brief Project file input and output. @author Gianmaria Frigo */
 
 #include "briscola/model.hpp"
 

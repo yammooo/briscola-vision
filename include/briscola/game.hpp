@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_GAME_HPP
 #define BRISCOLA_GAME_HPP
 
-/** @file game.hpp @brief Complete-game orchestration. */
+/** @file game.hpp @brief Complete-game orchestration. @author Gianmaria Frigo */
 
 #include "briscola/model.hpp"
 #include "briscola/pipeline.hpp"

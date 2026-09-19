@@ -1,4 +1,7 @@
-"""Generate a synthetic one-class Briscola OBB dataset."""
+"""Generate a synthetic one-class Briscola OBB dataset.
+
+Main developer: Gianmaria Frigo.
+"""
 
 import argparse
 import shutil

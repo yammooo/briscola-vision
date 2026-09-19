@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_PIPELINE_HPP
 #define BRISCOLA_PIPELINE_HPP
 
-/** @file pipeline.hpp @brief Replaceable computer-vision pipeline contracts. */
+/** @file pipeline.hpp @brief Replaceable computer-vision pipeline contracts. @author Gianmaria Frigo */
 
 #include "briscola/debug.hpp"
 #include "briscola/model.hpp"

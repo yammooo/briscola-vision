@@ -1,3 +1,5 @@
+/** @file yolo_sift.cpp @author Gianmaria Frigo */
+
 #include "briscola/briscola_providers/most_frequent_briscola_provider.hpp"
 #include "briscola/debug.hpp"
 #include "briscola/game.hpp"

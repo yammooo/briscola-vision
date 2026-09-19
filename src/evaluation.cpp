@@ -1,3 +1,5 @@
+/** @file evaluation.cpp @author Gianmaria Frigo */
+
 #include "briscola/evaluation.hpp"
 
 namespace briscola {

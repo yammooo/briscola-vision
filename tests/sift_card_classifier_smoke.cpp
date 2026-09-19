@@ -1,3 +1,5 @@
+/** @file sift_card_classifier_smoke.cpp @author Gianmaria Frigo */
+
 #include "briscola/round_analyzers/yolo_sift_round_analyzer.hpp"
 
 #include <opencv2/imgcodecs.hpp>

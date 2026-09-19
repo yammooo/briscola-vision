@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_MOST_FREQUENT_BRISCOLA_PROVIDER_HPP
 #define BRISCOLA_MOST_FREQUENT_BRISCOLA_PROVIDER_HPP
 
-/** @file most_frequent_briscola_provider.hpp @brief Frequency-based briscola provider. */
+/** @file most_frequent_briscola_provider.hpp @brief Frequency-based briscola provider. @author Gianmaria Frigo */
 
 #include "briscola/pipeline.hpp"
 
