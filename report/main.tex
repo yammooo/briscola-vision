@@ -151,20 +151,6 @@ references, so feature extraction, mask creation, and brute-force matching take
 most of the time. The pipeline is not real-time, but real-time use is not the
 goal of this project.
 
-
-\subsection{K-Means and Bag-of-Visual-Words pipeline}
-
-\subsubsection{Overview}
-
-This pipeline explores how far a fully classical, non-neural detector and
-classifier can go on the same task. The goal was not to beat YOLO/local-features
-accuracy, but to map the boundary of a bag-of-visual-words classifier when
-the card is lying on a checked tablecloth, often partially covered by another
-card. The detector is a K-Means segmentation followed by a geometric filter; the
-classifier is a BoW vocabulary built from SIFT descriptors of the 40 reference
-scans. The pipeline is fully deterministic (k-means is seeded at 42) and
-requires no training data, no GPU, and no learned model.
-
 \subsection{K-Means and Bag-of-Visual-Words pipeline (PINTON MATTIA)}
 
 \subsubsection{Overview}
@@ -201,7 +187,7 @@ modelled by the largest clusters, and the brightest foreground cluster is taken
 as the card face. To recover fragmented regions caused by card figures, the mask
 undergoes mass morphological operations (heavy dilation followed by erosion).
 The largest blob is evaluated on five geometric properties, and its total combined
-score must pass a strict global threshold ($\ge 2.1$) to ensure the blob is an actual
+score must pass a global tolerance threshold (default $\ge 0.7$) to ensure the blob is an actual
 card and not a false positive like a player's hand or a shadow. The oriented
 bounding box (\texttt{minAreaRect}) is computed and then padded mathematically
 by 8\% to capture the physical card edges and provide a robust, context-rich crop
@@ -214,7 +200,7 @@ descriptors extracted from the 40 reference cards and their augmented
 variants. The augmentation covers rotations (including 180$^\circ$ for upside-down cards),
 illumination changes, scaling, blur, and partial occlusions. The occlusions
 are produced by cropping the card to a fraction of its area (40\%--90\% visible,
-centered), which reproduces the actual geometry of the detector's output.
+centered), which helps to focus on particular details of the card.
 
 Each variant produces one reference histogram of size K. At query time, the
 crop is aligned to the axes using the rotated rect, SIFT descriptors are extracted,
@@ -224,25 +210,25 @@ vocabulary is already rotation-aware).
 
 \subsubsection{Pipeline integration}
 
-\texttt{KMeansBriscolaProvider::find} scans up to 60 frames per round, calls
+\texttt{KMeansBriscolaProvider::find} scans up to 'maxFramesPerDetection' frames, calls
 \texttt{findBBox} on each, and on the first successful detection classifies the
 aligned crop. The provider implements \texttt{IBriscolaProvider}, so it can be
 plugged into the existing \texttt{GameRunner} without changes to the rules or
 the I/O.
 
-The BoW classifier also replaces the built-in template matcher inside the
-movement-pattern analyzer (\texttt{KMeansBowRoundAnalyzer}), via the \texttt{--bow} flag.
-Because the frames selected by the movement analyzer contain multiple cards
-(the briscola and the played cards), \texttt{findBBox} is guided by a
-\textbf{Dynamic Temporal Mask}. By computing the absolute difference (\texttt{absdiff})
-between a reference background frame (just before the player moves) and the
-action frame, the pipeline isolates the exact region of new movement. K-Means
-only searches inside this motion window, effortlessly ignoring the briscola and
-any overlapping previously played cards. To ensure stability against transient
-noise (e.g., a lingering hand), the pipeline uses a \textbf{Multi-frame Search Window},
-scanning up to 5 consecutive frames and locking onto the first geometrically
-perfect card.
-
+The BoW classifier also replaces the built-in template matcher inside the movement-pattern round analyzer
+(\texttt{KMeansBowRoundAnalyzer}).
+Because the frames selected by the movement analyzer contain multiple cards (the briscola and the 
+played cards), \texttt{findBBox} is guided by a \textbf{Dynamic Temporal Mask}. The analyzer
+processes the entire video to extract a 1D motion signal, smoothing it to pinpoint the exact
+resting frames where the first and second cards are played. By computing the absolute difference
+(\texttt{absdiff}) between the resting frame and the previous table state (the first frame for
+card 1, and the resting frame of card 1 for card 2), the pipeline isolates the exact region of new
+movement. This difference is thresholded, morphologically cleaned, dilated, and inverted to 
+create an exclusion mask. Rather than scanning multiple consecutive frames, \texttt{findBBox} is 
+called exactly once per played card on its specific resting frame. K-Means uses this mask to 
+search only inside the new motion window, effortlessly ignoring the briscola and any overlapping 
+previously played cards.
 \subsubsection{Results and limitations}
 
 The briscola card was recovered correctly on all four provided games. The

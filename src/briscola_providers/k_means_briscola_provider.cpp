@@ -119,7 +119,8 @@ namespace briscola {
         double maxAspect          = 10.0,
         double minSolidity        = 0.55,
         double minExtent          = 0.45,
-        double minRectangularity  = 0.50
+        double minRectangularity  = 0.50,
+        double tolerance          = 0.70
     ) {
         BlobScore s;
         s.label = label;
@@ -185,9 +186,9 @@ namespace briscola {
         if (s.rectangularity < minRectangularity) {
             return s;
         }
-
+        
         s.score = s.solidity + s.extent + s.rectangularity;
-        if(s.score < 0.70){
+        if(s.score < tolerance){
             s.accepted = false;
         } else {
             s.accepted = true;
@@ -274,11 +275,19 @@ namespace briscola {
      * passes the geometric thresholds.
      */
     std::optional<CardBBox> findBBox(
-        const std::vector<std::filesystem::path>& path, //path of every ROUND
+        const std::vector<std::filesystem::path>& path,
         int round,
-        int frameIndex, //frame of the round to observe
+        int frameIndex, 
         DebugSink* debug,
-        const cv::Mat& excludeMask
+        const cv::Mat& excludeMask,
+        int blurKernel,
+        int varWin,
+        double varThresh,
+        const int clusterCount,
+        const int tableClusterCount,
+        int closingStrength,
+        const double minCardAreaRatio,
+        float expansionPercent
     ) {
         cv::VideoCapture cap(path[round].string());
         if (!cap.isOpened()) {
@@ -289,13 +298,15 @@ namespace briscola {
         cv::Mat frame;
         cap.set(cv::CAP_PROP_POS_FRAMES, frameIndex);
         if (!cap.read(frame)) {
-        throw std::runtime_error("Cannot read first frame: " + path[round].string());
+        throw std::runtime_error("Cannot read frame: " + path[round].string());
         }
         
-        // Gaussian blur to suppress the checkerboard pattern before K-Means.
-        // The kernel size is hard-coded to 81 via testing.
+        // Kernels must be odd
+        if (blurKernel % 2 == 0) blurKernel++;
+        if (varWin % 2 == 0) varWin++;
+
+        
         // sigma = kernel/6 places +-3*sigma at the kernel boundary, avoiding hard truncation.
-        int blurKernel = 81;
         cv::Mat blurredFrame;
         cv::GaussianBlur(frame, blurredFrame, cv::Size(blurKernel, blurKernel), blurKernel/6.0);
         // Greyscale version of the blurred frame, used only by the local variance
@@ -326,7 +337,7 @@ namespace briscola {
         // spans at least one full light/dark cycle and variance is reliably high
         // over the pattern. 21 is the tested value.
         cv::Mat mu, mu2, varMap;
-        int varWin = 21;
+        
         cv::boxFilter(grayBlurred, mu, CV_32F, cv::Size(varWin, varWin));
         cv::Mat gray32;
         grayBlurred.convertTo(gray32, CV_32F);
@@ -347,16 +358,8 @@ namespace briscola {
         // background fragments on geometric grounds, whereas a card pixel that is
         // removed here cannot be recovered later.
         cv::Mat uniformMask;
-        double varThresh = 200.0;
         cv::threshold(varMap, uniformMask, varThresh, 255, cv::THRESH_BINARY_INV);
         uniformMask.convertTo(uniformMask, CV_8UC1);
-
-        // Each pixel is a three-dimensional BGR sample.
-        // I split pixels into "table" (largest clusters) and "foreground" (the rest).
-        // Among foreground clusters, the brightest one is assumed to be the card face.
-        // Tunable.
-        const int clusterCount = 6;
-        const int tableClusterCount = 3;
 
         // Flatten the blurred frame from a (rows x cols x 3) volume into a
         // (rows*cols x 3) matrix so that cv::kmeans sees one BGR sample per row.
@@ -423,25 +426,27 @@ namespace briscola {
 
         //the most #tableClusterCount clusters are labeled as table. this vector makes pixel checks fast.
         std::vector<bool> isTableCluster(clusterCount, false);
-        for (int index = 0; index < tableClusterCount; ++index) {
+        //for safety
+        int safeTableCount = std::min(tableClusterCount, clusterCount - 1); 
+
+        for (int index = 0; index < safeTableCount; ++index) {
             isTableCluster[clusterOrder[index]] = true;
         }
 
         std::vector<int> tableClusters;
-        for (int cluster = 0; cluster < clusterCount; ++cluster) {
-            if (isTableCluster[cluster]) tableClusters.push_back(cluster);
-        }
-        
         std::vector<int> foregroundClusters;
+
         for (int cluster = 0; cluster < clusterCount; ++cluster) {
-            if (!isTableCluster[cluster]) {
+            if (isTableCluster[cluster]) {
+                tableClusters.push_back(cluster);
+            } else {
                 foregroundClusters.push_back(cluster);
             }
         }
         
         // since card front is generally the brightest, i take that as the card.
         int candidateCluster = foregroundClusters[0];
-        for (int i = 1; i < (int)foregroundClusters.size(); ++i) {
+        for (int i = 1; i < static_cast<int>(foregroundClusters.size()); ++i) {
             const int c = foregroundClusters[i];
             if (clusterBrightness[c] > clusterBrightness[candidateCluster]) {
                 candidateCluster = c;
@@ -511,14 +516,11 @@ namespace briscola {
             // rectangolar kernel
             cv::Mat morphKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(15, 15));
 
-            // Strengh of the closing
-            int strength = 5; 
-
             // Dilation
-            cv::dilate(binaryMask, mergedMask, morphKernel, cv::Point(-1, -1), strength);
+            cv::dilate(binaryMask, mergedMask, morphKernel, cv::Point(-1, -1), closingStrength);
 
             // Contraption
-            cv::erode(mergedMask, mergedMask, morphKernel, cv::Point(-1, -1), strength);
+            cv::erode(mergedMask, mergedMask, morphKernel, cv::Point(-1, -1), closingStrength);
 
             // After closing small holes might survive: findcontours with filled
             std::vector<std::vector<cv::Point>> contours;
@@ -532,7 +534,6 @@ namespace briscola {
             );
             
             
-            // Pick the largest blob above a minimum area.
             // The candidate mask is dominated by the card, but still
             // contains small fragments (leftover checkerboard squares,
             // specular highlights, print noise). The 0.5% threshold
@@ -540,7 +541,7 @@ namespace briscola {
             // the largest is taken because the card face dominates every
             // other connected region. Label 0 is OpenCV's background and
             // is skipped.
-            const double minCardAreaRatio = 0.005;
+            
             const int minCardArea = static_cast<int>(minCardAreaRatio * frame.rows * frame.cols);
 
             int biggestLabel = -1;
@@ -677,7 +678,6 @@ namespace briscola {
                 // edge pixels are covered even if the detector underestimated
                 // the extent. The expanded rect is also drawn on the frame for
                 // the debug overlay.
-                float expansionPercent = 1.05f;
                 cv::RotatedRect expandedRotatedRect = bestRotatedRect;
                 expandedRotatedRect.size.width *= expansionPercent;
                 expandedRotatedRect.size.height *= expansionPercent;
@@ -781,14 +781,15 @@ namespace briscola {
     //###################### BRISCOLA DETECTION + CONF ######################
     std::optional<CardPrediction> runBriscolaDetection(
         const std::vector<std::filesystem::path>& path,
-        DebugSink* debug
+        DebugSink* debug,
+        const int maxFramesPerDetection = 60
     ) {
         // Try each round, then each frame within the round, until a card is
         // found. Scanning rounds first (outer loop) means an early round with
         // a clear briscola wins over a later round with a partially covered
         // one, which matches the game flow: the briscola is dealt at the
         // start of the round and is fully visible in the first frames.
-        const int maxFramesPerRound = 60;
+        
         std::optional<CardBBox> bbox;
         int foundRound = -1;
         int foundFrame = -1;
@@ -796,7 +797,7 @@ namespace briscola {
         // Stop as soon as a BBox is found
         for (int round = 0; round < static_cast<int>(path.size()) && !bbox.has_value(); ++round) {
             //search each frame until a box is found
-            for (int frame = 0; frame < maxFramesPerRound && !bbox.has_value(); ++frame) {
+            for (int frame = 0; frame < maxFramesPerDetection && !bbox.has_value(); ++frame) {
                 
                 std::optional<CardBBox> currentBbox = findBBox(path, round, frame, debug, cv::Mat());
                 
