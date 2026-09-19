@@ -196,7 +196,23 @@ public:
     std::size_t histogramCount() const;
 
 private:
+    /** 
+     * @brief Classifies one orientation of a crop and returns both the
+     *        best-matching card and the chi-square distance to it.
+     *
+     * Used by classify() to compare the upright and the 180°-rotated
+     * crops and keep the closer match. Isolating the
+     * single-orientation logic here avoids duplicating the descriptor
+     * extraction, histogram construction, and chi-square comparison.
+     * 
+     */
+    std::optional<std::pair<CardPrediction, double>> classifySingle(
+        const cv::Mat& cropped,
+        DebugSink* debug
+    ) const;
+
     cv::Ptr<cv::Feature2D> detector_ = cv::SIFT::create();
+    
 
     cv::Mat vocabulary_;                    ///< (K x D) CV_32F, one row per word.
     std::vector<cv::Mat> histograms_;       ///< One (1 x K) CV_32F per template.

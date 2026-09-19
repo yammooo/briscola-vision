@@ -370,7 +370,7 @@ namespace briscola {
         // Among foreground clusters, the brightest one is assumed to be the card face.
         // Tunable.
         const int clusterCount = 6;
-        const int tableClusterCount = 5;
+        const int tableClusterCount = 3;
 
         // Flatten the blurred frame from a (rows x cols x 3) volume into a
         // (rows*cols x 3) matrix so that cv::kmeans sees one BGR sample per row.
@@ -484,9 +484,11 @@ namespace briscola {
             // at 0.
             cv::Mat labels2D = labels.reshape(1, frame.rows);
             cv::Mat binaryMask(frame.size(), CV_8UC1, cv::Scalar(0));
+
             for (int yy = 0; yy < frame.rows; ++yy) {
                 for (int xx = 0; xx < frame.cols; ++xx) {
-                    if (labels2D.at<int>(yy, xx) == candidateCluster) {
+                    int pixelCluster = labels2D.at<int>(yy, xx);
+                    if (pixelCluster == candidateCluster) {
                         binaryMask.at<uchar>(yy, xx) = 255;
                     }
                 }
@@ -513,8 +515,49 @@ namespace briscola {
             // the AND zeros them out before connected components sees them.
             // This reduces the number of spurious small blobs and makes the subsequent
             // "pick the biggest blob" step more reliable.
+            
             cv::bitwise_and(binaryMask, uniformMask, binaryMask);
 
+            //i noticed that cards with large figures tend to segment in 2-3 compoents. 
+            //this helps to mitigate
+            // INVECE DI QUESTO:
+            // cv::Mat dilatedMask;
+            // cv::Mat dilateKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(31, 31));
+            // cv::dilate(binaryMask, dilatedMask, dilateKernel);
+
+            cv::Mat mergedMask;
+
+            // Usiamo un kernel rettangolare. MORPH_RECT è cruciale per le carte 
+            // perché aiuta a preservare gli angoli retti della BBox, a differenza di MORPH_ELLIPSE.
+            cv::Mat morphKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(15, 15));
+
+            // Questo è il tuo "Loop". Quante volte espandere e poi ritrarre.
+            // Più è alto, più gap giganteschi riuscirà a chiudere. 
+            // Parti da 4 o 5, se la carta è ancora spezzata, alza il numero.
+            int strength = 5; 
+
+            // 1. DILATAZIONE MASSIVA (Espansione)
+            // I frammenti della carta si gonfiano fino a scontrarsi e fondersi in un unico blob gigante.
+            cv::dilate(binaryMask, mergedMask, morphKernel, cv::Point(-1, -1), strength);
+
+            // 2. CONTRAZIONE MASSIVA (Erosione)
+            // Ritira i bordi esterni per riportare la carta alle sue dimensioni originali.
+            // Il trucco magico è che i "buchi" interni ormai collassati durante la dilatazione 
+            // non si riaprono, lasciando un blob solido.
+            cv::erode(mergedMask, mergedMask, morphKernel, cv::Point(-1, -1), strength);
+
+            // (Opzionale) A questo punto potresti avere ancora dei buchetti molto piccoli all'interno
+            // che non alterano la BBox ma danno fastidio. Un semplice findContours con FILLED li annienta:
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(mergedMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+            mergedMask = cv::Mat::zeros(mergedMask.size(), CV_8UC1);
+            cv::drawContours(mergedMask, contours, -1, cv::Scalar(255), cv::FILLED);
+
+            // Ora passa 'mergedMask' al tuo connectedComponentsWithStats
+            cv::Mat ccLabels, ccStats, ccCentroids;
+            const int ccNum = cv::connectedComponentsWithStats(
+                mergedMask, ccLabels, ccStats, ccCentroids, 8, CV_32S
+            );
             // Run connected components on the binary candidate mask to separate it into
             // individual blobs. Each contiguous group of white pixels becomes one labeled
             // region. We use 8-connectivity so that diagonally touching pixels are
@@ -524,11 +567,13 @@ namespace briscola {
             // candidate mask. ccStats gives us area, bounding box, and centroid for each
             // blob without having to iterate the label matrix ourselves, which is why we
             // prefer connectedComponentsWithStats over the plain connectedComponents.
+            /*
             cv::Mat ccLabels, ccStats, ccCentroids;
             const int ccNum = cv::connectedComponentsWithStats(
-                binaryMask, ccLabels, ccStats, ccCentroids, 8, CV_32S
+                dilatedMask, ccLabels, ccStats, ccCentroids, 8, CV_32S
             );
-
+            */
+            
             // Pick the largest blob above a minimum area.
             // The candidate mask is dominated by the card, but still
             // contains small fragments (leftover checkerboard squares,
@@ -649,7 +694,13 @@ namespace briscola {
                 boundingBox.height = stats.at<int>(bestBlobLabel, cv::CC_STAT_HEIGHT);
 
                 std::vector<cv::Point> blobPoints;
-                cv::findNonZero(filled, blobPoints);
+                for (int yy = boundingBox.y; yy < boundingBox.y + boundingBox.height; ++yy) {
+                    for (int xx = boundingBox.x; xx < boundingBox.x + boundingBox.width; ++xx) {
+                        if (componentLabels.at<int>(yy, xx) == bestBlobLabel) {
+                            blobPoints.push_back(cv::Point(xx, yy));
+                        }
+                    }
+                }
                 if (!blobPoints.empty()) {
                     bestRotatedRect = cv::minAreaRect(blobPoints);
                 } else {
@@ -668,7 +719,7 @@ namespace briscola {
                 // edge pixels are covered even if the detector underestimated
                 // the extent. The expanded rect is also drawn on the frame for
                 // the debug overlay.
-                cv::Rect expanded = expandRect(boundingBox, 1.20, frame.size());
+                cv::Rect expanded = expandRect(boundingBox, 1.05, frame.size());
                 cardMask = cv::Mat::zeros(frame.size(), CV_8UC1);
                 cardMask(expanded).setTo(255);
                 cv::rectangle(frame, expanded, cv::Scalar(0, 255, 0), 2);
@@ -727,6 +778,15 @@ namespace briscola {
                 cardImage = rotatedFrame(axisAligned).clone();
             }
         }
+
+        
+        if (debug && !cardImage.empty()) {
+            debug->publishImage("capture",
+                path[round].stem().string() + "_card_image_" + std::to_string(frameIndex),
+                0, cardImage, true, false);
+        }
+
+
         // Build the result. rect and rotatedRect describe the card's
         // geometry; mask is the expanded rectangle used by the caller
         // to inhibit the card before the next detection. mask is cloned

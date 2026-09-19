@@ -9,7 +9,9 @@
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " CARD_REFERENCES ROUND_VIDEO [--debug-window] [--debug-dir DIRECTORY] [--debug-text]\n";
+        std::cerr << "Usage: " << argv[0]
+                  << " CARD_REFERENCES ROUND_VIDEO"
+                     " [--debug-window] [--debug-text] [--debug-dir DIR]\n";
         return 1;
     }
 
@@ -17,6 +19,7 @@ int main(int argc, char* argv[]) {
         bool showWindow = false;
         bool showText = false;
         std::filesystem::path debugDirectory;
+
         for (int index = 3; index < argc; ++index) {
             const std::string option = argv[index];
             if (option == "--debug-window") {
@@ -30,12 +33,20 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        const auto references = briscola::readCardReferences(argv[1]);
+        const std::vector<briscola::CardReference> references =
+            briscola::readCardReferences(argv[1]);
+
         briscola::KMeansBowRoundAnalyzer analyzer(references);
-        briscola::DebugSink debug(debugDirectory, !debugDirectory.empty(), showWindow);
-        const auto observation = analyzer.analyze(
+
+        briscola::DebugSink debug(
+            debugDirectory,
+            !debugDirectory.empty(),
+            showWindow
+        );
+
+        const briscola::RoundObservation observation = analyzer.analyze(
             argv[2],
-            showWindow || showText || !debugDirectory.empty() ? &debug : nullptr
+            (showWindow || showText || !debugDirectory.empty()) ? &debug : nullptr
         );
 
         const auto cardText = [](const std::optional<briscola::CardPrediction>& card) {
@@ -43,25 +54,27 @@ int main(int argc, char* argv[]) {
             const char* suit = card->card.suit == briscola::Suit::Cups   ? "cups"
                              : card->card.suit == briscola::Suit::Coins  ? "coins"
                              : card->card.suit == briscola::Suit::Clubs  ? "clubs"
-                             : "spades";
+                                                                         : "spades";
             return std::to_string(card->card.rank) + "-" + suit;
         };
 
         const auto playerText = [](const std::optional<briscola::Player>& player) {
-            if (!player) return "unknown";
-            return *player == briscola::Player::North ? "North" : "South";
+            if (!player) return std::string("unknown");
+            return *player == briscola::Player::North ? std::string("North")
+                                                      : std::string("South");
         };
 
         std::cout << "Leader: " << playerText(observation.leader) << '\n';
         std::cout << "North:  " << cardText(observation.northCard) << '\n';
         std::cout << "South:  " << cardText(observation.southCard) << '\n';
         if (observation.briscolaCandidate) {
-            std::cout << "Briscola candidate: " << cardText(observation.briscolaCandidate) << '\n';
+            std::cout << "Briscola candidate: "
+                      << cardText(observation.briscolaCandidate) << '\n';
         }
         return 0;
+
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';
         return 1;
     }
 }
-
