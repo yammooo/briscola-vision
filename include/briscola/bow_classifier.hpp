@@ -197,7 +197,7 @@ public:
 
 private:
     cv::Ptr<cv::Feature2D> detector_ = cv::SIFT::create();
-
+    
     cv::Mat vocabulary_;                    ///< (K x D) CV_32F, one row per word.
     std::vector<cv::Mat> histograms_;       ///< One (1 x K) CV_32F per template.
     std::vector<Card> labels_;              ///< Card identity for each histogram.
