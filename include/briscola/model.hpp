@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_MODEL_HPP
 #define BRISCOLA_MODEL_HPP
 
-/** @file model.hpp @brief Domain and result data types. */
+/** @file model.hpp @brief Domain and result data types. @author Gianmaria Frigo */
 
 #include <optional>
 #include <string>

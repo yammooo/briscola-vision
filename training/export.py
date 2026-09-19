@@ -1,4 +1,7 @@
-"""Export a trained Briscola OBB checkpoint for OpenCV DNN."""
+"""Export a trained Briscola OBB checkpoint for OpenCV DNN.
+
+Main developer: Gianmaria Frigo.
+"""
 
 import argparse
 import shutil

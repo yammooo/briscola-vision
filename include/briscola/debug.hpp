@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_DEBUG_HPP
 #define BRISCOLA_DEBUG_HPP
 
-/** @file debug.hpp @brief Optional visualization output for vision pipelines. */
+/** @file debug.hpp @brief Optional visualization output for vision pipelines. @author Gianmaria Frigo */
 
 #include <opencv2/core/mat.hpp>
 

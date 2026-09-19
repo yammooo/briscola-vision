@@ -1,3 +1,5 @@
+/** @file io.cpp @author Gianmaria Frigo */
+
 #include "briscola/io.hpp"
 
 #include <opencv2/imgcodecs.hpp>

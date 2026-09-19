@@ -1,3 +1,5 @@
+/** @file most_frequent_briscola_provider_test.cpp @author Gianmaria Frigo */
+
 #include "briscola/briscola_providers/most_frequent_briscola_provider.hpp"
 #include "briscola/round_analyzers/yolo_sift_round_analyzer.hpp"
 

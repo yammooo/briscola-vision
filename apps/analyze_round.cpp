@@ -1,3 +1,5 @@
+/** @file analyze_round.cpp @author Gianmaria Frigo */
+
 #include "briscola/debug.hpp"
 #include "briscola/io.hpp"
 #include "briscola/round_analyzers/yolo_sift_round_analyzer.hpp"

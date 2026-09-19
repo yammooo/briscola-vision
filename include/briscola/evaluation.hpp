@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_EVALUATION_HPP
 #define BRISCOLA_EVALUATION_HPP
 
-/** @file evaluation.hpp @brief End-to-end prediction metrics. */
+/** @file evaluation.hpp @brief End-to-end prediction metrics. @author Gianmaria Frigo */
 
 #include "briscola/model.hpp"
 
