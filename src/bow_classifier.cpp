@@ -589,77 +589,6 @@ bool BoWClassifier::isReady() const {
     return !vocabulary_.empty() && !histograms_.empty() &&
            histograms_.size() == labels_.size();
 }
-//############################## CLASSIFY SINGLE ###############################
-/**
- * @brief Classifies one orientation of a crop and returns both the
- *        best-matching card and the chi-square distance to it.
- *
- *        This is the building block used by classify(): the public method
- *        calls it twice, once on the crop as-is and once on the crop rotated
- *        by 180°, and keeps the result with the smaller distance.
- *
- * @param cropped  BGR image containing a single card.
- * @param debug    Optional debug sink.
- * @return The best CardPrediction and its chi-square distance, or
- *         std::nullopt if the classifier is not ready or the crop yields
- *         no descriptors.
- */
-std::optional<std::pair<CardPrediction, double>> BoWClassifier::classifySingle(
-    const cv::Mat& cropped,
-    DebugSink* debug
-) const {
-    if (!isReady() || cropped.empty()) {
-        return std::nullopt;
-    }
-
-    // Extract SIFT descriptors from the query crop. The same detector
-    // is used at training time, which is required: descriptors from a
-    // different detector (e.g. ORB instead of SIFT) live in a different
-    // space and cannot be compared to the vocabulary.
-    std::vector<cv::KeyPoint> keypoints;
-    cv::Mat descriptors;
-    detector_->detectAndCompute(cropped, cv::noArray(), keypoints, descriptors);
-
-    if (descriptors.empty()) {
-        return std::nullopt;
-    }
-
-    const cv::Mat queryHist = buildHistogram(descriptors, vocabulary_, vocabularySize_);
-
-    std::vector<std::pair<double, int>> allDistances;
-    allDistances.reserve(histograms_.size());
-
-    for (std::size_t i = 0; i < histograms_.size(); ++i) {
-        const double dist = cv::compareHist(queryHist, histograms_[i], cv::HISTCMP_CHISQR);
-        allDistances.push_back({dist, static_cast<int>(i)});
-    }
-
-    std::sort(allDistances.begin(), allDistances.end());
-
-    if (allDistances.empty()) {
-        return std::nullopt;
-    }
-
-    const int bestIndex = allDistances[0].second;
-    const double bestDistance = allDistances[0].first;
-
-    if (debug) {
-        std::cout << "  orientation best: idx=" << bestIndex
-                  << " rank=" << labels_[bestIndex].rank
-                  << " suit=" << static_cast<int>(labels_[bestIndex].suit)
-                  << " dist=" << bestDistance << std::endl;
-    }
-
-    CardPrediction prediction;
-    prediction.card = labels_[bestIndex];
-    // La confidence viene calcolata dal chiamante (classify) sulla
-    // distanza assoluta, non qui. La mettiamo a 0 come placeholder.
-    prediction.confidence = 0.0f;
-
-    return std::make_pair(prediction, bestDistance);
-}
-
-//################################# CLASSIFIER #################################
 /**
  * @brief Classifies a cropped card image against the reference histograms,
  *        trying both the upright and the 180°-rotated orientation.
@@ -704,62 +633,37 @@ std::optional<CardPrediction> BoWClassifier::classify(
         return std::nullopt;
     }
 
-    // Orientation 1: the crop as-is.
-    std::optional<std::pair<CardPrediction, double>> upright =
-        classifySingle(cropped, debug);
+    // Estrazione keypoints e descrittori (inglobata da classifySingle)
+    std::vector<cv::KeyPoint> keypoints;
+    cv::Mat descriptors;
+    detector_->detectAndCompute(cropped, cv::noArray(), keypoints, descriptors);
 
-    // Orientation 2: the crop rotated by 180°. cv::rotate with ROTATE_180
-    // is equivalent to a half-turn around the image center, which is the
-    // transformation between the two players' viewpoints.
-    cv::Mat rotated;
-    cv::rotate(cropped, rotated, cv::ROTATE_180);
-    std::optional<std::pair<CardPrediction, double>> flipped =
-        classifySingle(rotated, debug);
-
-    // Combine the two results. Three cases:
-    //   - both failed: return nullopt.
-    //   - only one succeeded: return that one.
-    //   - both succeeded: return the one with the smaller distance.
-    if (!upright.has_value() && !flipped.has_value()) {
+    // Se l'immagine non produce descrittori (troppo scura, troppo sfocata), fallisce
+    if (descriptors.empty()) {
         return std::nullopt;
     }
 
-    // Scegli l'orientazione con la distanza minore. Usiamo un flag booleano
-    // invece di confrontare gli optional, perche' CardPrediction non ha
-    // operator== e il confronto optional< pair< CardPrediction,double > >
-    // non compilerebbe.
-    bool choseUpright = false;
-    std::optional<std::pair<CardPrediction, double>> best;
+    // Costruzione dell'istogramma di query assegnando ogni descrittore al vocabolario
+    cv::Mat queryHist = buildHistogram(descriptors, vocabulary_, vocabularySize_);
 
-    if (!upright.has_value() && !flipped.has_value()) {
-        return std::nullopt;
-    } else if (!upright.has_value()) {
-        best = flipped;
-        choseUpright = false;
-    } else if (!flipped.has_value()) {
-        best = upright;
-        choseUpright = true;
-    } else {
-        if (upright->second <= flipped->second) {
-            best = upright;
-            choseUpright = true;
-        } else {
-            best = flipped;
-            choseUpright = false;
+    // Ricerca dell'istogramma di riferimento più simile usando la distanza Chi-Quadrato
+    double bestDistance = std::numeric_limits<double>::max();
+    std::size_t bestIdx = 0;
+
+    for (std::size_t i = 0; i < histograms_.size(); ++i) {
+        double dist = cv::compareHist(queryHist, histograms_[i], cv::HISTCMP_CHISQR);
+        if (dist < bestDistance) {
+            bestDistance = dist;
+            bestIdx = i;
         }
     }
 
     if (debug) {
-        std::cout << "BoW orientation compare: upright dist="
-                << (upright.has_value() ? std::to_string(upright->second) : "n/a")
-                << "  flipped dist="
-                << (flipped.has_value() ? std::to_string(flipped->second) : "n/a")
-                << "  -> chose "
-                << (choseUpright ? "upright" : "flipped")
-                << std::endl;
+        std::cout << "  orientation best: idx=" << bestIdx
+                  << " rank=" << labels_[bestIdx].rank
+                  << " suit=" << static_cast<int>(labels_[bestIdx].suit)
+                  << " dist=" << bestDistance << std::endl;
     }
-
-    const double bestDistance = best->second;
 
     // Confidence: map the winning chi-square distance to [0, 1] using two
     // empirical thresholds.
@@ -771,7 +675,8 @@ std::optional<CardPrediction> BoWClassifier::classify(
                      (ambiguousDistance - clearDistance);
     }
 
-    CardPrediction result = best->first;
+    CardPrediction result;
+    result.card = labels_[bestIdx];
     result.confidence = static_cast<float>(confidence);
     return result;
 }
