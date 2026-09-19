@@ -146,20 +146,6 @@ references, so feature extraction, mask creation, and brute-force matching take
 most of the time. The pipeline is not real-time, but real-time use is not the
 goal of this project.
 
-
-\subsection{K-Means and Bag-of-Visual-Words pipeline}
-
-\subsubsection{Overview}
-
-This pipeline explores how far a fully classical, non-neural detector and
-classifier can go on the same task. The goal was not to beat YOLO/local-features
-accuracy, but to map the boundary of a bag-of-visual-words classifier when
-the card is lying on a checked tablecloth, often partially covered by another
-card. The detector is a K-Means segmentation followed by a geometric filter; the
-classifier is a BoW vocabulary built from SIFT descriptors of the 40 reference
-scans. The pipeline is fully deterministic (k-means is seeded at 42) and
-requires no training data, no GPU, and no learned model.
-
 \subsection{K-Means and Bag-of-Visual-Words pipeline (PINTON MATTIA)}
 
 \subsubsection{Overview}
