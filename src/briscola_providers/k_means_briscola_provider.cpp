@@ -260,22 +260,6 @@ namespace briscola {
             d.roundPath.stem().string(), 0, blobReport);
     }
 
-    /**
-     * @brief Expand BBox but keep the center
-     */
-    cv::Rect expandRect(
-        const cv::Rect& r,
-        double factor,
-        const cv::Size& bounds
-        ) {
-        const int dw = static_cast<int>(std::round(r.width  * (factor - 1.0) / 2.0));
-        const int dh = static_cast<int>(std::round(r.height * (factor - 1.0) / 2.0));
-        cv::Rect e(r.x - dw, r.y - dh, r.width + 2 * dw, r.height + 2 * dh);
-
-        // clpis at image edges to avoid out of bounds 
-        e &= cv::Rect(0, 0, bounds.width, bounds.height);
-        return e;
-    }
     //######################### MAIN FUNCTIONS #########################
     /**
      * @brief Locates the most card-like blob in a single frame and returns
@@ -301,11 +285,6 @@ namespace briscola {
         throw std::runtime_error("Cannot read first frame: " + path[round].string());
         }
         
-        cv::Mat gray;
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-        cv::Mat floatGray;
-        gray.convertTo(floatGray, CV_32F);
-
         // Gaussian blur to suppress the checkerboard pattern before K-Means.
         // The kernel size is hard-coded to 81 via testing.
         // sigma = kernel/6 places +-3*sigma at the kernel boundary, avoiding hard truncation.
@@ -445,6 +424,7 @@ namespace briscola {
         for (int cluster = 0; cluster < clusterCount; ++cluster) {
             if (isTableCluster[cluster]) tableClusters.push_back(cluster);
         }
+        
         std::vector<int> foregroundClusters;
         for (int cluster = 0; cluster < clusterCount; ++cluster) {
             if (!isTableCluster[cluster]) {
@@ -712,20 +692,38 @@ namespace briscola {
                     );
                 }
 
-                // cardMask is the bounding box expanded by 20%, filled solid.
+                // cardMask is the bounding box expanded by 5%, filled solid.
                 // It is used by a possible RoundAnalyzer to inhibit the detected card
                 // before searching for the next one, so a slightly larger area
                 // is preferable to a tight one: it guarantees that the card's
                 // edge pixels are covered even if the detector underestimated
                 // the extent. The expanded rect is also drawn on the frame for
                 // the debug overlay.
-                cv::Rect expanded = expandRect(boundingBox, 1.05, frame.size());
+                float expansionPercent = 1.05f;
+                cv::RotatedRect expandedRotatedRect = bestRotatedRect;
+                expandedRotatedRect.size.width *= expansionPercent;
+                expandedRotatedRect.size.height *= expansionPercent;
+
+                // Estraiamo i 4 vertici (in formato float)
+                cv::Point2f pts2f[4];
+                expandedRotatedRect.points(pts2f);
+
+                // Convertiamo in interi per il disegno
+                cv::Point pts[4];
+                for (int i = 0; i < 4; ++i) {
+                    pts[i] = pts2f[i];
+                }
+
+                // Riempiamo il poligono esatto nella maschera
                 cardMask = cv::Mat::zeros(frame.size(), CV_8UC1);
-                cardMask(expanded).setTo(255);
-                cv::rectangle(frame, expanded, cv::Scalar(0, 255, 0), 2);
+                cv::fillConvexPoly(cardMask, pts, 4, cv::Scalar(255), cv::LINE_8);
+
+                // Disegniamo a schermo il riquadro ruotato al posto di quello dritto
+                for (int i = 0; i < 4; ++i) {
+                    cv::line(frame, pts[i], pts[(i + 1) % 4], cv::Scalar(0, 255, 0), 2);
+                }
             }
         }
-
         if (debug) {
             KMeansDebugData debugData = {
                 frame,
@@ -796,6 +794,7 @@ namespace briscola {
         result.mask = cardMask.clone();
         result.rotatedRect = bestRotatedRect;
         result.image = cardImage;
+        result.score = bestBlobScore;
         return result;
     }
     
@@ -811,20 +810,29 @@ namespace briscola {
         // a clear briscola wins over a later round with a partially covered
         // one, which matches the game flow: the briscola is dealt at the
         // start of the round and is fully visible in the first frames.
-        const int maxFramesPerRound = 30;
+        const int maxFramesPerRound = 60;
         std::optional<CardBBox> bbox;
         int foundRound = -1;
         int foundFrame = -1;
 
+        // Ripristiniamo la logica temporale: ci fermiamo non appena troviamo una BBox
         for (int round = 0; round < static_cast<int>(path.size()) && !bbox.has_value(); ++round) {
+            
+            // AGGIUNTO: && !bestBboxOverall.has_value() anche nel loop dei frame!
             for (int frame = 0; frame < maxFramesPerRound && !bbox.has_value(); ++frame) {
-                bbox = findBBox(path, round, frame, debug);
-                if (bbox.has_value()) {
+                
+                std::optional<CardBBox> currentBbox = findBBox(path, round, frame, debug, cv::Mat());
+                
+                if (currentBbox.has_value()) {
+                    // IL PRIMO CHE TROVA VINCE. Non cerchiamo carte "più perfette" 
+                    // nei frame futuri, altrimenti peschiamo le giocate degli avversari.
+                    bbox = currentBbox;
                     foundRound = round;
                     foundFrame = frame;
                 }
             }
         }
+
         if (!bbox.has_value()) {
             if (debug) {
                 std::cout << "runBriscolaDetection: no card found in any frame" << std::endl;
