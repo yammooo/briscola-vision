@@ -186,7 +186,11 @@ namespace briscola {
         }
 
         s.score = s.solidity + s.extent + s.rectangularity;
-        s.accepted = true;
+        if(s.score < 0.70){
+            s.accepted = false;
+        } else {
+            s.accepted = true;
+        }
         return s;
     }
 
