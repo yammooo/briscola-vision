@@ -1,3 +1,4 @@
+//PINTON MATTIA
 #include "briscola/bow_classifier.hpp"
 
 #include <opencv2/imgcodecs.hpp>

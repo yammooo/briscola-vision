@@ -1,3 +1,4 @@
+//PINTON MATTIA
 /**
  * @brief Sanity check for the BoW classifier: classifies every reference
  * template against the trained vocabulary and reports how many are

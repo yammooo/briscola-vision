@@ -1,3 +1,4 @@
+//PINTON MATTIA
 /** 
  * @brief Smoke test for the BoVW-based KMeansBriscolaProvider.
  *

@@ -69,7 +69,8 @@ By taking the difference between the very first frame and the frame after the fi
 The pipeline relies on the assumption that **each player's hand fully retreats before the other player acts or before the cards are collected**. This assumption fails in game 3, where players sometimes pick up the cards while the second hand is still retreating, or the winner enters the frame before a stable still moment is reached. In those cases, `frame_part1` or `frame_part2` may not land on a clean card-only frame, leading to wrong crops that contain only hands or arms.  Games 1, 2, and 4 respect the assumption well and the pipeline performs significantly better on them.
 
 Use this pipeline when speed matters and game footage follows a clear play-and-retreat pattern. Use YOLO/SIFT when maximum accuracy is the priority, and when the play and retreat pattern is ot followed.
-## K-Means + BoVW pipeline
+
+## K-Means + BoVW pipeline `//PINTON MATTIA`
 
 This pipeline was built to explore how far a fully classical, non-neural, non-SIFT approach could go on the same task. The goal was not to beat the YOLO/local-feature or movement-pattern pipelines, but to map the boundary of a bag-of-visual-words classifier on the specific conditions of this dataset: a card lying on a checked tablecloth, often partially covered by another card, filmed from a fixed camera.
 
@@ -155,6 +156,7 @@ mkdir -p models/bow
     data/game3 data/game3resultsCORRECTED.csv \
     data/game4 data/game4resultsCORRECTED.csv
 ```
+
 ## Full test script
 
 The commands above can be run in sequence to build the project, train the
@@ -162,6 +164,7 @@ vocabulary from scratch, and run every check on the four provided games.
 The script writes the two evaluation reports to /tmp/baseline.txt and
 /tmp/bow.txt and prints their summaries side by side, so the two
 pipelines can be compared at a glance.
+
 ```sh
 set -e
 
@@ -194,6 +197,7 @@ echo "=== 5. Evaluation BoW ==="
 
 echo "=== Done ==="
 ```
+
 ## Build
 
 Install OpenCV. On Fedora:
