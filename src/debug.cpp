@@ -1,3 +1,5 @@
+/** @file debug.cpp @author Gianmaria Frigo */
+
 #include "briscola/debug.hpp"
 
 #include <opencv2/highgui.hpp>

@@ -1,3 +1,5 @@
+/** @file game.cpp @author Gianmaria Frigo */
+
 #include "briscola/game.hpp"
 
 #include "briscola/io.hpp"

@@ -30,8 +30,7 @@ vision pipeline only produces evidence, while the shared game code calculates
 the round outcomes and final result. In this way, every pipeline uses the same
 game rules and can be compared fairly.
 
-We analyse one round video at a time because it contains the information for
-one trick. An \texttt{IRoundAnalyzer} reads a video and returns a
+An \texttt{IRoundAnalyzer} reads a round video and returns a
 \texttt{RoundObservation}, while \texttt{GameRunner} orders the videos, gives
 each round its number, and collects the observations. The fields in
 \texttt{RoundObservation} are optional because a card can be covered, blurred,
@@ -287,8 +286,7 @@ result.
 \section{Contributions and working hours}
 
 All group members contributed to the initial ideation and to defining the
-shared project architecture. The remaining individual contributions and hours
-will be completed before delivery.
+shared project architecture.
 
 \begin{table}[h]
     \centering

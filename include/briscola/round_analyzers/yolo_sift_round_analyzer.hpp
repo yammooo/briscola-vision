@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_YOLO_SIFT_ROUND_ANALYZER_HPP
 #define BRISCOLA_YOLO_SIFT_ROUND_ANALYZER_HPP
 
-/** @file yolo_sift_round_analyzer.hpp @brief YOLO and SIFT round analyzer. */
+/** @file yolo_sift_round_analyzer.hpp @brief YOLO and SIFT round analyzer. @author Gianmaria Frigo */
 
 #include "briscola/io.hpp"
 #include "briscola/pipeline.hpp"

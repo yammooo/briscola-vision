@@ -1,4 +1,7 @@
-"""Fine-tune YOLO26n-OBB on the generated Briscola dataset."""
+"""Fine-tune YOLO26n-OBB on the generated Briscola dataset.
+
+Main developer: Gianmaria Frigo.
+"""
 
 import argparse
 import os

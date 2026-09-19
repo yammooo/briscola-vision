@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_RULES_HPP
 #define BRISCOLA_RULES_HPP
 
-/** @file rules.hpp @brief Deterministic Briscola rules. */
+/** @file rules.hpp @brief Deterministic Briscola rules. @author Gianmaria Frigo */
 
 #include "briscola/model.hpp"
 

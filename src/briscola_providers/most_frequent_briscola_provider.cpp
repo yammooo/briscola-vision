@@ -1,3 +1,5 @@
+/** @file most_frequent_briscola_provider.cpp @author Gianmaria Frigo */
+
 #include "briscola/briscola_providers/most_frequent_briscola_provider.hpp"
 
 namespace briscola {

@@ -1,3 +1,5 @@
+/** @file rules.cpp @author Gianmaria Frigo */
+
 #include "briscola/rules.hpp"
 
 #include <stdexcept>
