@@ -1,3 +1,4 @@
+/** @file first_frame_briscola_provider.cpp @author Martina Naldoni */
 #include "briscola/briscola_providers/first_frame_briscola_provider.hpp"
 #include "briscola/timing_profile.hpp"
 

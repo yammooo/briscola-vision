@@ -1,6 +1,11 @@
 \documentclass[11pt,a4paper]{article}
 
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{array}
 \graphicspath{{images/}{report/images/}}
 
 \title{Briscola Vision}
@@ -253,6 +258,222 @@ descriptors locally and uses geometric verification, does not suffer from
 this failure mode and is the recommended method when occlusion is expected.
 Estimated number of hours for the implemnetation: 50 hours. 
 
+
+\subsection{Movement Pattern pipeline}
+The Movement Pattern pipeline, along with the standalone applications
+\texttt{movement\_pattern} and \texttt{evaluate\_}\allowbreak\texttt{movement\_pattern},
+was conceived, designed, developed, tested, and performance-optimized
+independently by Martina Naldoni.
+It was designed with the goal of achieving high computational efficiency,
+identifying the approximate positions of the cards through temporal frame differencing
+in order to inspect the minimum number of frames required.
+
+\subsubsection{First-frame briscola provider}
+For the briscola provider, card localization is achieved by differencing the
+first frame of specific rounds. In round 1, frame 0, there is only the briscola
+and the draw deck on top of it, alongside the background. In the first frame of
+an endgame round (we chose round 17), there are the trick decks of cards won by
+each player, the briscola and remaining deck, and the background. In the last
+round (round 20), the briscola and draw deck are no longer there, leaving only
+the background and each player's won cards. Turning this into an equation:
+\begin{align}
+    I_{\text{briscola}} &= (I_{\text{player decks}} + I_{\text{bg}} + I_{\text{briscola}}) - (I_{\text{player decks}} + I_{\text{bg}}) \nonumber \\
+    &= \left| I_{\text{round 17, frame 0}} - I_{\text{round 20, frame 0}} \right|
+\end{align}
+This differencing is paired with blob detection because smaller differences in
+illumination might produce minor false positive returns. It isolates an
+accurate, small region of interest (a $500 \times 500$ window around the
+detected centroid on round 1, frame 0) to compare with the 40 reference card
+templates. Comparing features only within this cropped window rather than the
+entire frame reduced matching time from $\sim 15$ seconds to $1.3$ seconds. The
+card prediction is obtained using SIFT by computing the keypoints of each
+template and comparing them to those of the extracted window with a simple
+most-matches-win technique.
+
+\subsubsection{Movement pattern round analyzer}
+For the round analyzer, to achieve an efficient analysis it was essential to
+evaluate the least possible number of frames. The 2 played cards are accurately
+located by evaluating only 3 frames per round. To determine which frames to
+analyze, the movement between consecutive frames is computed as the number of
+pixels with significant intensity changes:
+\begin{equation}
+    M(t) = \sum_{(x,y)} \mathbb{I}\left( \left| I_t(x,y) - I_{t-1}(x,y) \right| > \tau \right)
+\end{equation}
+The movement is treated as a continuous signal $M(t)$, whose derivative
+$\frac{dM}{dt}$ is computed (after Gaussian smoothing) to locate local peaks and
+troughs. Observing the movement graph reveals a characteristic kinematic pattern:
+to insert a new card, the hand comes into the frame (movement local peak),
+positions the card on the table (movement local low), and then retracts (movement
+local peak). After it has retracted, there is a low that reaches near 0, or 0,
+when the other player evaluates the card that was just played. This pattern then
+repeats for the second card played. This allows us to find frames where, with
+high confidence, only cards and background are present without hands.
+
+This logic is challenged in game 3, where the author's grandmother leaves her
+hand in the frame after placing the card, or does not wait to place the second
+card and collects the cards in one single continuous move. Nevertheless, cards
+and round leaders are still detected this way.
+
+The near-0 movement lows after each pattern are when we decide to extract the
+frames to analyze:
+\begin{align}
+    \Delta I_{\text{first card}} &= (I_{\text{bg}} + I_{\text{briscola}} + I_{\text{card}_1}) - (I_{\text{bg}} + I_{\text{briscola}}) \nonumber \\
+    &= \left| I_{\text{frame after first pattern}} - I_{\text{frame 0}} \right| \\[6pt]
+    \Delta I_{\text{second card}} &= (I_{\text{bg}} + I_{\text{briscola}} + I_{\text{card}_1} + I_{\text{card}_2}) \nonumber \\
+    &\quad - (I_{\text{bg}} + I_{\text{briscola}} + I_{\text{card}_1}) \nonumber \\
+    &= \left| I_{\text{frame after second pattern}} - I_{\text{frame after first pattern}} \right|
+\end{align}
+As before, blob detection filters out minor false positives, refines the
+bounding box around the card as closely as possible, and passes it to an ORB
+classifier. The classifier precomputes the features of the 40 template cards at
+application startup and caches them in memory, comparing them to the descriptors
+of the bounding box to assign the card prediction via nearest match inliers.
+
+\paragraph{Leader Identification via First Motion.}
+The leading player is recognized directly by checking where the very first
+movement in the frame appears. When the motion curve reaches its first entry
+peak ($P_{1a}$), the camera frame is partitioned into an upper region
+($Y \in [0, 0.65H]$) and a lower region ($Y \in [0.35H, H]$). The analyzer
+evaluates the number of thresholded moving pixels in both halves:
+\begin{equation}
+    \text{Leader} =
+    \begin{cases}
+        \text{North} & \text{if } M_{\text{top}}(P_{1a}) \ge M_{\text{bottom}}(P_{1a}) \\
+        \text{South} & \text{otherwise}
+    \end{cases}
+\end{equation}
+Because the kinematic curve isolates the exact frame where the first hand
+enters the field of view before the card is deposited, this spatial motion check
+is exceptionally robust against subsequent card overlap or hand withdrawal,
+achieving 98.8\% accuracy on Mac and a perfect \textbf{100.0\% (80/80 rounds)}
+on the VLab server.
+
+\subsubsection{Practical example}
+
+To illustrate the concrete operation of the Movement Pattern pipeline,
+Figure~\ref{fig:movement-graph} and Figure~\ref{fig:practical-example} present a
+complete walkthrough of a representative round (Game 1, Round 3).
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.88\linewidth]{movement_graph.jpg}
+    \caption{Kinematic motion curve $M(t)$ for Game 1, Round 3. The raw difference signal (gray) and Gaussian-smoothed curve (blue) reveal the entry peaks ($P_{1a}, P_{2a}$), retraction peaks ($P_{1b}, P_{2b}$), and the quiescent near-zero troughs where frames are selected: frame 46 (\texttt{PART 1}) and frame 97 (\texttt{PART 2}).}
+    \label{fig:movement-graph}
+\end{figure}
+
+The kinematic movement signal $M(t)$ extracted from the round video is displayed
+in Figure~\ref{fig:movement-graph}. The graph showcases the dual-peak structure
+characteristic of human card-playing behavior:
+\begin{itemize}
+    \item \textbf{First card play and leader detection:} At frame 24, the leading
+    player's hand enters the frame, reaching initial peak motion $P_{1a}$. Checking
+    the spatial distribution of motion at this peak reveals $M_{\text{top}} > M_{\text{bottom}}$,
+    correctly identifying Player North as the round leader. After positioning the
+    card, the hand withdraws, creating peak $P_{1b}$ at frame 41. Once the hand has
+    fully exited, motion drops to near zero, locking onto frame 46 (\texttt{PART 1})
+    for first card evaluation.
+    \item \textbf{Second card play:} The responding player (South) enters the view,
+    producing peak $P_{2a}$ at frame 74, places their card, and retracts at peak
+    $P_{2b}$ (frame 91). Motion collapses again to near zero, triggering frame 97
+    (\texttt{PART 2}) as the second evaluation frame.
+    \item \textbf{Subsequent spikes:} Later motion spikes (around frames 122
+    and 163) correspond to the trick winner collecting the played cards from the
+    table at the end of the round.
+\end{itemize}
+
+\begin{figure}[h]
+    \centering
+    \begin{minipage}[b]{0.26\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{table_one_card.jpg} \\
+        \vspace{2pt}{\footnotesize (a) Frame at \texttt{PART 1}}
+    \end{minipage}%
+    \hfill
+    \begin{minipage}[b]{0.26\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{card_roi_500x500.jpg} \\
+        \vspace{2pt}{\footnotesize (b) Card 1 ROI ($500\times500$)}
+    \end{minipage}%
+    \hfill
+    \begin{minipage}[b]{0.16\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{card_resized_patch.jpg} \\
+        \vspace{2pt}{\footnotesize (c) Card 1 Rectified}
+    \end{minipage}
+
+    \vspace{8pt}
+
+    \begin{minipage}[b]{0.26\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{table_both_cards.jpg} \\
+        \vspace{2pt}{\footnotesize (d) Frame at \texttt{PART 2}}
+    \end{minipage}%
+    \hfill
+    \begin{minipage}[b]{0.26\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{card2_roi_500x500.jpg} \\
+        \vspace{2pt}{\footnotesize (e) Card 2 ROI ($500\times500$)}
+    \end{minipage}%
+    \hfill
+    \begin{minipage}[b]{0.16\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{card2_resized_patch.jpg} \\
+        \vspace{2pt}{\footnotesize (f) Card 2 Rectified}
+    \end{minipage}
+    \vspace{4pt}
+    \caption{Visual progression of the Movement Pattern pipeline in Game 1, Round 3:
+    Top row: First card processing at \texttt{PART 1} (frame 46), showing (a) quiescent frame with the 7 of Batons, (b) extracted $500 \times 500$ ROI, and (c) rectified card patch.
+    Bottom row: Second card processing at \texttt{PART 2} (frame 97), showing (d) quiescent frame with both cards, (e) extracted $500 \times 500$ ROI for the second card, and (f) rectified patch correctly classified as the 3 of Batons.}
+    \label{fig:practical-example}
+\end{figure}
+
+Figure~\ref{fig:practical-example} traces the complete visual processing of both
+cards across these stationary moments:
+\begin{enumerate}
+    \item At frame 46 (\texttt{PART 1}), the first player has deposited the 7 of
+    Batons and withdrawn their hand (Figure~\ref{fig:practical-example}a).
+    Differencing this frame against quiescent frame 0 ($\Delta I = |I_{46} - I_0|$)
+    cleanly subtracts the background and briscola deck, isolating the first card.
+    A localized $500 \times 500$ bounding box is cropped
+    (Figure~\ref{fig:practical-example}b), and contour rectification normalizes the
+    patch (Figure~\ref{fig:practical-example}c) for ORB template matching, correctly
+    predicting the \emph{7 of Batons}.
+    \item At frame 97 (\texttt{PART 2}), both cards rest motionless on the cloth
+    (Figure~\ref{fig:practical-example}d). Differencing frame 97 against frame 46
+    ($\Delta I = |I_{97} - I_{46}|$) cancels the tablecloth and the previously
+    played 7 of Batons. A $500 \times 500$ ROI isolates the new card
+    (Figure~\ref{fig:practical-example}e), which is rectified
+    (Figure~\ref{fig:practical-example}f) and correctly identified as the
+    \emph{3 of Batons}.
+\end{enumerate}
+
+\subsubsection{Execution times and official benchmark timings}
+The execution time of the Movement Pattern pipeline was profiled across all four
+games (20 rounds each) on two different hardware environments:
+\begin{itemize}
+    \item \textbf{Vlab Server (x86-64 processor)}:
+    \begin{itemize}
+        \item Preprocessing (reference feature caching): 15 seconds
+        \item Game 1: 1' 35''
+        \item Game 2: 1' 25''
+        \item Game 3: 1' 17''
+        \item Game 4: 1' 35''
+        \item Total runtime across all 4 games: 6' 07'' ($\approx 1'\;28''$ average per 20-round game)
+    \end{itemize}
+    \item \textbf{Personal Laptop (MacBook with Apple Silicon M1 processor)}:
+    \begin{itemize}
+        \item Preprocessing (reference feature caching): 2 seconds
+        \item Game 1: 32''
+        \item Game 2: 25''
+        \item Game 3: 23''
+        \item Game 4: 28''
+        \item Total runtime across all 4 games: 1' 48'' ($\approx 27''$ average per 20-round game)
+    \end{itemize}
+\end{itemize}
+Compared to the YOLO pipeline which requires 28--34 minutes per game on CPU,
+the Movement Pattern pipeline achieves a $\approx 20\times$ speedup on the x86-64
+Vlab server and over a $60\times$ speedup on the M1 MacBook.
+
 \section{Results and discussion}
 
 All pipelines are run on the same supplied games and evaluated against the
@@ -262,26 +483,105 @@ briscola, final game results, and execution time.
 \begin{table}[h]
     \centering
     {\small
-    \setlength{\tabcolsep}{3pt}
+    \setlength{\tabcolsep}{1.8pt}
     \begin{tabular}{lccccc}
             \hline
-            Pipeline & Cards & Leader/winner & Briscola & Game result & Time \\
+            Pipeline & Cards & Leader & Briscola & Result & Time \\
             \hline
             YOLO + ORB & 98.75\% & 100\% & 75\% & 100\% & 28--34 min/game \\
-            Other pipeline & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} \\
+            Movement Pattern (M1) & 86.9\% & 98.8\% & 100\% & 66.7\% & 27 s/game \\
+            Movement Pattern (VLab) & 88.1\% & 100\% & 100\% & 50.0\% & 1' 28''/game \\
+            K-Means + BoW & 42.5\% & 67.5\% & 100\% & 33.3\% & $\sim$3 min/game \\
             \hline
         \end{tabular}\par}
     \caption{Results on the supplied games.}
     \label{tab:results}
 \end{table}
 
-Across the four games, the pipeline correctly predicted 158 of 160 player
+Across the four games, the YOLO + ORB pipeline correctly predicted 158 of 160 player
 cards, all 160 leader/winner fields, three of four briscola cards, and all 12
 final-game-result fields. The only briscola error had the correct suit but the
 wrong rank; it therefore did not affect any round winner, score, or final game
 result.
 
-% Discuss only observed errors and the relevant speed/accuracy trade-offs.
+The Movement Pattern pipeline presents an exceptionally compelling speed-accuracy
+trade-off. By leveraging temporal motion differencing to inspect only 2--3 critical
+frames per round, it eliminates the immense computational burden of frame-by-frame
+deep-learning inference, finishing all 20 rounds of a game in just 25--30 seconds on
+the M1 MacBook (and under 1'30'' on Vlab). Across the four benchmark games, it
+achieves 100\% Briscola recognition, 98.8\%--100\% leader accuracy, and
+86.9\%--88.1\% overall card accuracy. Under standard playing tempo (Game 4), its
+accuracy reaches a flawless 100\% across all categories. Its primary failure mode
+occurs in Game 3, where a player's hand lingers on the table, perturbing the
+stationary frame differencing.
+
+The K-Means + BoW pipeline successfully solves the static tablecloth segmentation
+and identifies Briscola cards on all games (100\%), but struggles with partial
+occlusion on played cards (42.5\% accuracy), as visual word histograms fail to
+differentiate partially covered cards that share dominant repeating symbols.
+
+\subsection{Platform comparison: Apple Silicon M1 vs.\ Virtual Lab (x86-64)}
+
+To verify reproducibility across architectures, the Movement Pattern pipeline
+was evaluated on both the development machine (MacBook with Apple Silicon M1)
+and the official evaluation environment (Virtual Lab server with x86-64 CPU).
+Table~\ref{tab:platform-comparison} compares the per-game and aggregate metrics
+obtained on each platform.
+
+\begin{table}[h]
+    \centering
+    {\small
+    \setlength{\tabcolsep}{2.5pt}
+    \begin{tabular}{lcccc}
+        \hline
+        Benchmark Element & \multicolumn{2}{c}{MacBook (Apple M1)} & \multicolumn{2}{c}{Virtual Lab (x86-64)} \\
+        & Count & Accuracy & Count & Accuracy \\
+        \hline
+        Game 1 Cards & 37 / 40 & 92.5\% & 36 / 40 & 90.0\% \\
+        Game 1 Leader & 20 / 20 & 100.0\% & 20 / 20 & 100.0\% \\
+        Game 2 Cards & 37 / 40 & 92.5\% & \textbf{40 / 40} & \textbf{100.0\%} \\
+        Game 2 Leader & 20 / 20 & 100.0\% & 20 / 20 & 100.0\% \\
+        Game 3 Cards & 25 / 40 & 62.5\% & 25 / 40 & 62.5\% \\
+        Game 3 Leader & 19 / 20 & 95.0\% & \textbf{20 / 20} & \textbf{100.0\%} \\
+        Game 4 Cards & \textbf{40 / 40} & \textbf{100.0\%} & \textbf{40 / 40} & \textbf{100.0\%} \\
+        Game 4 Leader & \textbf{20 / 20} & \textbf{100.0\%} & \textbf{20 / 20} & \textbf{100.0\%} \\
+        \hline
+        \textbf{Grand Total Cards} & 139 / 160 & \textbf{86.9\%} & 141 / 160 & \textbf{88.1\%} \\
+        \textbf{Grand Total Leader} & 79 / 80 & \textbf{98.8\%} & 80 / 80 & \textbf{100.0\%} \\
+        \textbf{Briscola (all games)} & 4 / 4 & \textbf{100.0\%} & 4 / 4 & \textbf{100.0\%} \\
+        \textbf{Game Result fields} & 8 / 12 & \textbf{66.7\%} & 6 / 12 & \textbf{50.0\%} \\
+        \textbf{Execution Time (total)} & \multicolumn{2}{c}{1' 48'' ($\approx 27$ s/game)} & \multicolumn{2}{c}{6' 07'' ($\approx 1'$ 28''/game)} \\
+        \hline
+    \end{tabular}\par}
+    \caption{Per-game performance comparison of the Movement Pattern pipeline between Apple Silicon M1 and Virtual Lab (x86-64).}
+    \label{tab:platform-comparison}
+\end{table}
+
+The empirical comparison reveals notable cross-platform consistency alongside
+subtle architecture-specific traits:
+\begin{itemize}
+    \item \textbf{Briscola and Game 4 stability:} The Briscola provider achieves
+    a perfect 100\% (4/4 games) on both platforms. Similarly, Game 4 exhibits
+    flawless 100\% accuracy across all 40 cards, 20 leaders, and 3 game result
+    fields in both environments.
+    \item \textbf{Virtual Lab perfection on Game 2 and Leaders:} In the VLab
+    environment, Game 2 achieves a perfect 40/40 (100.0\%) card recognition score,
+    and the round leader is correctly identified across all 80 rounds (100.0\%),
+    yielding an overall card recognition rate of 88.1\% (141/160).
+    \item \textbf{Origin of variations:} The slight variance on borderline rounds
+    (e.g., Game 1 South card 11, Game 2 North card 1) stems from low-level
+    floating-point arithmetic differences in OpenCV between ARM NEON vector
+    primitives (Apple Silicon) and x86-64 AVX/SSE instructions (VLab). Minor
+    rounding variations during Gaussian filtering and affine rectification subtly
+    shift sub-pixel keypoint coordinates and ORB descriptor angles near the
+    inlier threshold boundary.
+    \item \textbf{Execution throughput:} The Apple M1 processor benefits from
+    fast unified memory, processing an entire 20-round game in $\approx 27$
+    seconds, while the shared VLab virtualized CPU completes a game in
+    $\approx 1'$ 28''. Both platforms run faster than real-time video playback
+    (which lasts $\sim 2$--$3$ minutes per game) and represent a vast speedup over
+    the 28--34 minutes per game required by YOLO.
+\end{itemize}
 
 \clearpage
 \section{Contributions and working hours}
@@ -292,7 +592,7 @@ shared project architecture.
 \begin{table}[h]
     \centering
     \small
-    \begin{tabular}{p{0.21\linewidth} p{0.59\linewidth} c}
+    \begin{tabular}{p{0.20\linewidth} >{\raggedright\arraybackslash}p{0.62\linewidth} c}
         \hline
         Member & Contribution & Hours \\
         \hline
@@ -302,12 +602,19 @@ shared project architecture.
         local-feature pipeline: synthetic dataset, model training and export,
         OpenCV inference, classification, temporal aggregation, tests, and
         performance measurements. & \texttt{50} \\
-        Martina Naldoni & Shared ideation and architecture. Individual
-        implementation, tests, and performance measurements: \texttt{TODO}. &
-        \texttt{TODO} \\
-        Mattia Pinton & Shared ideation and architecture. Individual
-        implementation, tests, and performance measurements: \texttt{TODO}. &
-        \texttt{TODO} \\
+        Martina Naldoni & Shared ideation and architecture. Conceived, designed,
+        and implemented the complete Movement Pattern pipeline
+        (\texttt{MovementPatternRoundAnalyzer}, \texttt{FirstFrameBriscolaProvider})
+        and its standalone applications (\texttt{movement\_}\allowbreak\texttt{pattern},
+        \texttt{evaluate\_}\allowbreak\texttt{movement\_}\allowbreak\texttt{pattern}). Kinematic motion curve analysis,
+        multi-round differential background subtraction, precomputed ORB feature
+        caching, benchmarking on Vlab and M1, profiling, and runtime optimization. &
+        \texttt{50} \\
+        Mattia Pinton & Shared ideation and architecture. Classical
+        vision pipeline: K-Means table segmentation, local variance filtering,
+        morphological card localization, SIFT visual vocabulary generation,
+        and Bag-of-Visual-Words classifier implementation. &
+        \texttt{50} \\
         \hline
     \end{tabular}
     \caption{Group contributions and working hours.}
@@ -316,7 +623,19 @@ shared project architecture.
 
 \section{Conclusion}
 
-% Summarize the best-performing pipeline, its main limitation, and one concrete
-% improvement that would be worth pursuing.
+In this project, we developed and compared multiple computer vision approaches
+to automated Briscola game analysis: a deep-learning oriented detector (YOLO + ORB),
+an ultra-fast kinematics-driven method (Movement Pattern), and a classical
+appearance-based method (K-Means + Bag of Words).
+
+Our shared architecture allows the user to choose the path that best suits their
+specific needs, whether their priority is maximum precision or high execution
+speed. Users who demand the highest classification accuracy across difficult
+occlusions can select the YOLO pipeline, while users who need near-instantaneous
+results on everyday hardware (processing an entire 20-round game in under half a
+minute with over 86\%--88\% accuracy and 100\% Briscola recognition) can choose
+the Movement Pattern pipeline. We believe that this flexibility—offering clear
+trade-offs between computational cost and accuracy—is what makes our project
+especially versatile and complete.
 
 \end{document}

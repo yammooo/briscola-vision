@@ -1,4 +1,4 @@
-// evaluate_movement_pattern.cpp
+/** @file evaluate_movement_pattern.cpp @author Martina Naldoni */
 //
 // Runs MovementPatternRoundAnalyzer + FirstFrameBriscolaProvider on one or
 // more game folders, compares each prediction to its own ground truth CSV

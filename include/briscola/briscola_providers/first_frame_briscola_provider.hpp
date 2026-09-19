@@ -3,6 +3,7 @@
 
 /** @file first_frame_briscola_provider.hpp
  *  @brief First-frame SIFT + RANSAC based briscola provider.
+ *  @author Martina Naldoni
  */
 
 #include "briscola/pipeline.hpp"

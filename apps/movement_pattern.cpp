@@ -1,3 +1,5 @@
+/** @file movement_pattern.cpp @author Martina Naldoni */
+
 #include "briscola/debug.hpp"
 #include "briscola/io.hpp"
 #include "briscola/round_analyzers/movement_pattern_round_analyzer.hpp"

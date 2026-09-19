@@ -1,3 +1,5 @@
+/** @file briscola_finder.cpp @author Martina Naldoni */
+
 #include <iostream>
 #include <vector>
 #include <string>

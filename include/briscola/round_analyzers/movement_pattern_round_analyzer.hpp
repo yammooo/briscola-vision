@@ -1,7 +1,7 @@
 #ifndef BRISCOLA_MOVEMENT_PATTERN_ROUND_ANALYZER_HPP
 #define BRISCOLA_MOVEMENT_PATTERN_ROUND_ANALYZER_HPP
 
-/** @file movement_pattern_round_analyzer.hpp @brief Motion-driven round analyzer. */
+/** @file movement_pattern_round_analyzer.hpp @brief Motion-driven round analyzer. @author Martina Naldoni */
 
 #include "briscola/io.hpp"
 #include "briscola/pipeline.hpp"
